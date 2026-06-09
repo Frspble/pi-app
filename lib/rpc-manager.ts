@@ -39,6 +39,10 @@ export class AgentSessionWrapper {
     return this._alive;
   }
 
+  isBusy(): boolean {
+    return Boolean(this.inner.isStreaming || this.inner.isCompacting);
+  }
+
   start(): void {
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       this.resetIdleTimer();
@@ -263,6 +267,16 @@ function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSes
 
 export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
   return getRegistry().get(sessionId);
+}
+
+export function getRpcRuntimeState(): { aliveSessions: number; busySessions: number; busy: boolean } {
+  const sessions = Array.from(getRegistry().values()).filter((session) => session.isAlive());
+  const busySessions = sessions.filter((session) => session.isBusy()).length;
+  return {
+    aliveSessions: sessions.length,
+    busySessions,
+    busy: busySessions > 0,
+  };
 }
 
 /**
