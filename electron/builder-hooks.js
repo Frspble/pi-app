@@ -80,17 +80,29 @@ function removePackage(nodeModulesDir, packageName) {
   fs.rmSync(packageDir, { recursive: true, force: true });
 }
 
-function removeCorePackageMetadata(appDir, rootPackage) {
+function copyDirectory(source, target) {
+  if (!fs.existsSync(source)) return;
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.cpSync(source, target, { recursive: true });
+}
+
+function removeCorePackages(nodeModulesDir, packageNames) {
+  if (!fs.existsSync(nodeModulesDir)) return [];
+
+  const removed = [];
+  for (const packageName of packageNames) {
+    removePackage(nodeModulesDir, packageName);
+    removed.push(packageName);
+  }
+  return removed;
+}
+
+function trimPackagedPackageMetadata(appDir, rootPackage) {
   const packagePath = path.join(appDir, "package.json");
   const packageJson = readJson(packagePath);
   for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
-    if (!packageJson[field]) continue;
-    for (const packageName of CORE_PACKAGES) {
-      delete packageJson[field][packageName];
-    }
-    if (Object.keys(packageJson[field]).length === 0) {
-      delete packageJson[field];
-    }
+    delete packageJson[field];
   }
   packageJson.piCore = rootPackage.piCore;
   fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
@@ -109,15 +121,21 @@ module.exports = async function afterPack(context) {
   const nonCoreClosure = collectClosure(packages, nonCoreRoots);
 
   const appDir = getPackagedAppDir(context);
-  removeCorePackageMetadata(appDir, rootPackage);
+  trimPackagedPackageMetadata(appDir, rootPackage);
+  copyDirectory(
+    path.join(appDir, ".next", "static"),
+    path.join(appDir, ".next", "standalone", ".next", "static"),
+  );
+  copyDirectory(
+    path.join(appDir, "public"),
+    path.join(appDir, ".next", "standalone", "public"),
+  );
 
-  const nodeModulesDir = path.join(appDir, "node_modules");
-  const removed = [];
-  for (const packageName of coreClosure) {
-    if (nonCoreClosure.has(packageName)) continue;
-    removePackage(nodeModulesDir, packageName);
-    removed.push(packageName);
-  }
+  const coreOnlyPackages = [...coreClosure].filter((packageName) => !nonCoreClosure.has(packageName));
+  const removed = [
+    ...removeCorePackages(path.join(appDir, "node_modules"), coreOnlyPackages),
+    ...removeCorePackages(path.join(appDir, ".next", "standalone", "node_modules"), coreOnlyPackages),
+  ];
 
   if (removed.length > 0) {
     console.log(`[desktop] pruned ${removed.length} Pi Core runtime packages from packaged app`);

@@ -8,7 +8,7 @@ const http = require("http");
 const net = require("net");
 const path = require("path");
 
-const PRODUCT_NAME = "Pi Agent Web";
+const PRODUCT_NAME = "Pi App";
 const CORE_PACKAGES = [
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-ai",
@@ -19,7 +19,7 @@ const SERVER_READY_TIMEOUT_MS = 90 * 1000;
 
 app.setName(PRODUCT_NAME);
 if (process.platform === "win32") {
-  app.setAppUserModelId("works.earendil.pi-web");
+  app.setAppUserModelId("works.earendil.pi-app");
 }
 
 let mainWindow = null;
@@ -260,7 +260,7 @@ function ensureRuntimePackageJson(runtimeDir, specs) {
   }
 
   const nextPkg = {
-    name: "pi-agent-web-runtime",
+    name: "pi-app-runtime",
     private: true,
     version: "0.0.0",
     ...runtimePkg,
@@ -597,9 +597,45 @@ function resolveNextBin(appRoot) {
   }
 }
 
+function resolveStandaloneServer(appRoot) {
+  return path.join(appRoot, ".next", "standalone", "server.js");
+}
+
+function getStandaloneBuildId(standaloneDir) {
+  try {
+    return fs.readFileSync(path.join(standaloneDir, ".next", "BUILD_ID"), "utf8").trim();
+  } catch {
+    return null;
+  }
+}
+
+function getRuntimeStandaloneDir(runtimeDir) {
+  return path.join(runtimeDir, "standalone");
+}
+
+function syncRuntimeStandalone(appRoot, runtimeDir) {
+  const packagedStandalone = path.join(appRoot, ".next", "standalone");
+  const runtimeStandalone = getRuntimeStandaloneDir(runtimeDir);
+  const packagedBuildId = getStandaloneBuildId(packagedStandalone);
+  const runtimeBuildId = getStandaloneBuildId(runtimeStandalone);
+  const runtimeServer = path.join(runtimeStandalone, "server.js");
+
+  if (packagedBuildId && packagedBuildId === runtimeBuildId && fs.existsSync(runtimeServer)) {
+    return runtimeServer;
+  }
+
+  log("Syncing Next.js standalone server to runtime", `source=${packagedStandalone}\ntarget=${runtimeStandalone}`);
+  fs.rmSync(runtimeStandalone, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(runtimeStandalone), { recursive: true });
+  fs.cpSync(packagedStandalone, runtimeStandalone, { recursive: true });
+  return runtimeServer;
+}
+
 function buildNodePath(runtimeNodeModules) {
   return [
     runtimeNodeModules,
+    path.join(getAppRoot(), ".next", "standalone", "node_modules"),
+    path.join(runtimeInfo?.runtimeDir ?? "", "standalone", "node_modules"),
     path.join(getAppRoot(), "node_modules"),
     process.env.NODE_PATH,
   ].filter(Boolean).join(path.delimiter);
@@ -628,17 +664,29 @@ async function startNextServer() {
   }
 
   const port = await findFreePort();
-  const nextBin = resolveNextBin(appRoot);
-  const mode = devMode ? "dev" : "start";
-  const args = [nextBin, mode, "-p", String(port), "-H", "127.0.0.1"];
+  const packagedStandaloneServer = resolveStandaloneServer(appRoot);
+  if (!devMode && !fs.existsSync(packagedStandaloneServer)) {
+    throw new Error("Next.js standalone server was not found. Run npm run build before packaging.");
+  }
+
+  const standaloneServer = devMode
+    ? packagedStandaloneServer
+    : syncRuntimeStandalone(appRoot, runtimeInfo.runtimeDir);
+  const command = getNodeCommand();
+  const mode = devMode ? "dev" : "standalone";
+  const args = devMode
+    ? [resolveNextBin(appRoot), "dev", "-p", String(port), "-H", "127.0.0.1"]
+    : [standaloneServer];
   const env = withDesktopPath({
     ...process.env,
+    HOSTNAME: "127.0.0.1",
     NODE_PATH: buildNodePath(runtimeInfo.nodeModules),
     PI_WEB_CORE_RUNTIME_DIR: runtimeInfo.runtimeDir,
     NEXT_TELEMETRY_DISABLED: "1",
+    PORT: String(port),
   });
 
-  log(`Starting Next.js ${mode} server`, `node=${getNodeCommand()}\nnext=${nextBin}\nport=${port}\nruntime=${runtimeInfo.runtimeDir}`);
+  log(`Starting Next.js ${mode} server`, `node=${command}\nargs=${args.join(" ")}\nport=${port}\nruntime=${runtimeInfo.runtimeDir}`);
   await showStatus(PRODUCT_NAME, `Starting local ${devMode ? "development" : "production"} server...`);
 
   return new Promise((resolve, reject) => {
@@ -648,7 +696,7 @@ async function startNextServer() {
       reject(new Error(`Next.js did not become ready within ${SERVER_READY_TIMEOUT_MS}ms.\n\n${output.slice(-2000)}`));
     }, SERVER_READY_TIMEOUT_MS);
 
-    nextProcess = spawn(getNodeCommand(), args, {
+    nextProcess = spawn(command, args, {
       cwd: appRoot,
       env,
       shell: false,
