@@ -2,6 +2,14 @@ import coreWebVitals from "eslint-config-next/core-web-vitals";
 import typescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
+  {
+    ignores: [
+      "dist-desktop/**",
+      ".next/**",
+      "out/**",
+      "build/**",
+    ],
+  },
   ...coreWebVitals,
   ...typescript,
   {
