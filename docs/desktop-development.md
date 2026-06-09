@@ -60,15 +60,15 @@ the Next dev server.
 macOS:
 
 ```text
-~/Library/Application Support/Pi Agent Web/runtime
-~/Library/Application Support/Pi Agent Web/desktop.log
+~/Library/Application Support/Pi App/runtime
+~/Library/Application Support/Pi App/desktop.log
 ```
 
 Windows:
 
 ```text
-%APPDATA%/Pi Agent Web/runtime
-%APPDATA%/Pi Agent Web/desktop.log
+%APPDATA%/Pi App/runtime
+%APPDATA%/Pi App/desktop.log
 ```
 
 The `Pi Core > Open Log File` menu item opens the startup log from the packaged

@@ -16,7 +16,8 @@
   "files": [
     "bin",
     "electron",
-    ".next",
+    ".next/standalone",
+    ".next/static",
     "!.next/cache",
     "!.next/dev",
     "!.next/**/*.js.map",
@@ -70,28 +71,23 @@
     "typescript": "^5"
   },
   "build": {
-    "appId": "works.earendil.pi-web",
-    "productName": "Pi Agent Web",
+    "appId": "works.earendil.pi-app",
+    "productName": "Pi App",
     "asar": false,
     "afterPack": "electron/builder-hooks.js",
     "directories": {
       "output": "dist-desktop"
     },
     "files": [
-      ".next/**/*",
-      "app/**/*",
+      ".next/standalone/**/*",
+      ".next/static/**/*",
       "bin/**/*",
-      "components/**/*",
       "electron/**/*",
-      "hooks/**/*",
-      "lib/**/*",
       "public/**/*",
-      "next.config.ts",
       "package.json",
-      "postcss.config.mjs",
-      "tailwind.config.ts",
       "!.next/cache{,/**}",
       "!.next/dev{,/**}",
+      "!node_modules{,/**}",
       "!node_modules/@earendil-works/pi-agent-core{,/**}",
       "!node_modules/@earendil-works/pi-ai{,/**}",
       "!node_modules/@earendil-works/pi-coding-agent{,/**}",
@@ -108,18 +104,7 @@
           "@earendil-works/pi-coding-agent": "^0.78.0"
         }
       },
-      "dependencies": {
-        "@lobehub/icons": "^5.6.0",
-        "@types/react-syntax-highlighter": "^15.5.13",
-        "mammoth": "^1.12.0",
-        "mermaid": "^11.14.0",
-        "next": "16.2.1",
-        "react": "^19.2.4",
-        "react-dom": "^19.2.4",
-        "react-markdown": "^10.1.0",
-        "react-syntax-highlighter": "^16.1.1",
-        "remark-gfm": "^4.0.1"
-      }
+      "dependencies": {}
     },
     "mac": {
       "target": [

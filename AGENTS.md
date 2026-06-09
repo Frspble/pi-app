@@ -1,4 +1,4 @@
-# Pi Agent Web - Development Notes
+# Pi App - Development Notes
 
 ## Quick Start
 

@@ -1,4 +1,4 @@
-# pi-web
+# Pi App
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的网页界面。在浏览器中浏览会话、与智能体对话、分叉对话、切换消息分支。
 
