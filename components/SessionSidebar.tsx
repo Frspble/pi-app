@@ -207,6 +207,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [customPathValue, setCustomPathValue] = useState("");
   const [customPathError, setCustomPathError] = useState<string | null>(null);
   const [customPathValidating, setCustomPathValidating] = useState(false);
+  const [cwdDragOver, setCwdDragOver] = useState(false);
+  const [desktopPathsAvailable, setDesktopPathsAvailable] = useState(false);
   const customPathInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [explorerOpen, setExplorerOpen] = useState(true);
@@ -253,6 +255,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    setDesktopPathsAvailable(Boolean(window.piDesktop?.selectDirectory && window.piDesktop?.getPathForFile));
+  }, []);
+
   const restoredRef = useRef(false);
 
   useEffect(() => {
@@ -281,24 +287,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
 
-  const commitCustomPath = useCallback(async () => {
-    const path = customPathValue.trim();
-    if (!path || customPathValidating) return;
-
+  const commitProjectPath = useCallback(async (candidate: string, options: { folderOnly?: boolean } = {}) => {
+    const nextPath = candidate.trim();
+    if (!nextPath || customPathValidating) return;
     setCustomPathValidating(true);
     setCustomPathError(null);
     try {
       const res = await fetch("/api/cwd/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: path }),
+        body: JSON.stringify({ cwd: nextPath }),
       });
       const data = await res.json().catch(() => ({})) as { cwd?: string; error?: string };
       if (!res.ok || data.error) {
-        setCustomPathError(data.error ?? `HTTP ${res.status}`);
+        const message = data.error ?? `HTTP ${res.status}`;
+        setCustomPathError(options.folderOnly && /not a directory/i.test(message) ? "Please drop a folder." : message);
         return;
       }
-      setSelectedCwd(data.cwd ?? path);
+      setSelectedCwd(data.cwd ?? nextPath);
       setCustomPathOpen(false);
       setCustomPathValue("");
       setDropdownOpen(false);
@@ -307,7 +313,60 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     } finally {
       setCustomPathValidating(false);
     }
-  }, [customPathValue, customPathValidating]);
+  }, [customPathValidating]);
+
+  const commitCustomPath = useCallback(async () => {
+    await commitProjectPath(customPathValue);
+  }, [commitProjectPath, customPathValue]);
+
+  const handleChooseDirectory = useCallback(async () => {
+    if (!window.piDesktop?.selectDirectory) {
+      setCustomPathOpen(true);
+      setCustomPathError("Folder picker is available in the desktop app. Type the path instead.");
+      setTimeout(() => customPathInputRef.current?.focus(), 0);
+      return;
+    }
+
+    setCustomPathError(null);
+    try {
+      const selectedPath = await window.piDesktop.selectDirectory();
+      if (!selectedPath) return;
+      await commitProjectPath(selectedPath);
+    } catch (error) {
+      setCustomPathError(error instanceof Error ? error.message : String(error));
+    }
+  }, [commitProjectPath]);
+
+  const handleCwdDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setCwdDragOver(true);
+    setDropdownOpen(true);
+  }, []);
+
+  const handleCwdDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes("Files")) return;
+    e.preventDefault();
+    setCwdDragOver(false);
+
+    const file = Array.from(e.dataTransfer.files)[0];
+    if (!file) return;
+    const droppedPath = window.piDesktop?.getPathForFile?.(file);
+    if (!droppedPath) {
+      setCustomPathOpen(true);
+      setCustomPathError("Folder drag-and-drop is available in the desktop app. Type the path instead.");
+      setTimeout(() => customPathInputRef.current?.focus(), 0);
+      return;
+    }
+    void commitProjectPath(droppedPath, { folderOnly: true });
+  }, [commitProjectPath]);
+
+  const handleCwdDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const nextTarget = e.relatedTarget;
+    if (nextTarget instanceof Node && e.currentTarget.contains(nextTarget)) return;
+    setCwdDragOver(false);
+  }, []);
 
   const handleDefaultCwd = useCallback(async () => {
     try {
@@ -451,7 +510,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
 
         {/* CWD picker */}
-        <div ref={dropdownRef} style={{ position: "relative" }}>
+        <div
+          ref={dropdownRef}
+          onDragEnter={handleCwdDragOver}
+          onDragOver={handleCwdDragOver}
+          onDragLeave={handleCwdDragLeave}
+          onDrop={handleCwdDrop}
+          style={{ position: "relative" }}
+        >
           <button
             onClick={() => setDropdownOpen((v) => !v)}
             style={{
@@ -459,8 +525,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               display: "flex",
               alignItems: "center",
               padding: "6px 10px",
-              background: selectedCwd ? "var(--bg-hover)" : "rgba(37,99,235,0.06)",
-              border: selectedCwd ? "1px solid var(--border)" : "1px solid rgba(37,99,235,0.4)",
+              background: cwdDragOver ? "rgba(37,99,235,0.10)" : selectedCwd ? "var(--bg-hover)" : "rgba(37,99,235,0.06)",
+              border: cwdDragOver ? "1px solid var(--accent)" : selectedCwd ? "1px solid var(--border)" : "1px solid rgba(37,99,235,0.4)",
               borderRadius: 7,
               cursor: "pointer",
               fontSize: 12,
@@ -481,7 +547,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               }}
               title={selectedCwd ?? ""}
             >
-              {selectedCwd ? shortenCwd(selectedCwd, homeDir) : (initialSessionId && !restoredRef.current ? "" : "Select project…")}
+              {cwdDragOver ? "Drop folder to select project…" : selectedCwd ? shortenCwd(selectedCwd, homeDir) : (initialSessionId && !restoredRef.current ? "" : "Select project…")}
             </span>
           </button>
 
@@ -566,8 +632,34 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 </button>
               )}
 
-              {/* Custom path entry */}
-              {!customPathOpen ? (
+              {/* Folder picker / custom path entry */}
+              {desktopPathsAvailable ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleChooseDirectory();
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    width: "100%",
+                    padding: "8px 10px",
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    fontSize: 11,
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <path d="M1 3A1 1 0 0 1 2 2H4L5 3.5H8.5a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 1 8V3Z" />
+                    <path d="M6.5 5H8" />
+                  </svg>
+                  <span>{customPathValidating ? "Checking…" : "Choose folder…"}</span>
+                </button>
+              ) : !customPathOpen ? (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -675,6 +767,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       Cancel
                     </button>
                   </div>
+                </div>
+              )}
+              {desktopPathsAvailable && customPathError && (
+                <div style={{
+                  padding: "0 10px 8px",
+                  color: "#dc2626",
+                  fontSize: 11,
+                  lineHeight: 1.35,
+                  overflowWrap: "anywhere",
+                }}>
+                  {customPathError}
                 </div>
               )}
             </div>
