@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 "use strict";
 
-const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
@@ -288,11 +288,52 @@ function readInstalledCoreVersions(runtimeDir) {
   return versions;
 }
 
+function getCoreStatus(remote = null) {
+  const runtimeDir = getRuntimeDir();
+  const specs = getCoreSpecs();
+  const installed = readInstalledCoreVersions(runtimeDir);
+  const packages = specs.map((spec) => {
+    const latest = remote?.[spec.name] ?? null;
+    const installedVersion = installed[spec.name] ?? null;
+    return {
+      name: spec.name,
+      range: spec.range,
+      installed: installedVersion,
+      latest,
+      status: !installedVersion
+        ? "missing"
+        : latest && latest !== installedVersion
+          ? "update-available"
+          : latest
+            ? "up-to-date"
+            : "unknown",
+    };
+  });
+
+  return {
+    productName: PRODUCT_NAME,
+    runtimeDir,
+    logPath: getLogPath(),
+    nodeModules: getRuntimeNodeModules(runtimeDir),
+    packages,
+  };
+}
+
 function missingCorePackages(versions) {
   return CORE_PACKAGES.filter((name) => !versions[name]);
 }
 
+function summarizeStatusDetail(detail) {
+  const lines = String(detail || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.at(-1) || "";
+}
+
 function createStatusHtml(title, message, detail = "") {
+  const summary = summarizeStatusDetail(detail);
+  const fullDetail = String(detail || "").slice(-4000);
   return `<!doctype html>
 <html>
   <head>
@@ -305,40 +346,130 @@ function createStatusHtml(title, message, detail = "") {
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #1a1a1a;
-        color: #e8e8e8;
+        background:
+          radial-gradient(circle at 20% 15%, rgba(62, 115, 255, 0.16), transparent 28%),
+          linear-gradient(145deg, #f7f8fb 0%, #eceff5 100%);
+        color: #182033;
         font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       main {
         width: 420px;
+        box-sizing: border-box;
+        padding: 28px;
+        border: 1px solid rgba(25, 35, 58, 0.1);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.86);
+        box-shadow: 0 24px 70px rgba(27, 38, 67, 0.16);
         line-height: 1.5;
       }
       h1 {
-        margin: 0 0 10px;
-        font-size: 18px;
+        margin: 0 0 8px;
+        font-size: 22px;
+        letter-spacing: 0;
       }
       p {
-        margin: 0 0 12px;
-        color: #b6beca;
+        margin: 0;
+        color: #5c6575;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 18px;
+        color: #3457d5;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+      .mark {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #3457d5;
+        box-shadow: 0 0 0 5px rgba(52, 87, 213, 0.12);
+      }
+      .bar {
+        position: relative;
+        height: 6px;
+        margin: 22px 0 12px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #dce2ee;
+      }
+      .bar::after {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 42%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #3457d5, #26a69a);
+        animation: slide 1.25s ease-in-out infinite;
+      }
+      .summary {
+        min-height: 18px;
+        color: #7a8393;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      details {
+        margin-top: 14px;
+        color: #7a8393;
+        font-size: 12px;
+      }
+      summary {
+        cursor: pointer;
+        user-select: none;
       }
       pre {
-        max-height: 120px;
+        max-height: 96px;
         overflow: auto;
-        margin: 0;
+        margin: 8px 0 0;
         padding: 10px;
-        border: 1px solid #3a3a3a;
-        border-radius: 6px;
-        background: #111;
-        color: #9ca3af;
+        border: 1px solid #d7deea;
+        border-radius: 8px;
+        background: #f8fafc;
+        color: #5c6575;
+        font-size: 11px;
         white-space: pre-wrap;
+      }
+      @keyframes slide {
+        0% { transform: translateX(-110%); }
+        55% { transform: translateX(80%); }
+        100% { transform: translateX(260%); }
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background:
+            radial-gradient(circle at 20% 15%, rgba(78, 112, 255, 0.18), transparent 28%),
+            linear-gradient(145deg, #111827 0%, #0b1020 100%);
+          color: #eef2ff;
+        }
+        main {
+          border-color: rgba(255, 255, 255, 0.1);
+          background: rgba(17, 24, 39, 0.88);
+          box-shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
+        }
+        p { color: #aeb7ca; }
+        .bar { background: #273144; }
+        .summary, details { color: #8e99ad; }
+        pre {
+          border-color: #2b3548;
+          background: #0b1020;
+          color: #aeb7ca;
+        }
       }
     </style>
   </head>
   <body>
     <main>
+      <div class="brand"><span class="mark"></span>${escapeHtml(PRODUCT_NAME)}</div>
       <h1>${escapeHtml(title)}</h1>
       <p>${escapeHtml(message)}</p>
-      ${detail ? `<pre>${escapeHtml(detail.slice(-4000))}</pre>` : ""}
+      <div class="bar" aria-hidden="true"></div>
+      <div class="summary">${summary ? escapeHtml(summary) : "Preparing local runtime..."}</div>
+      ${fullDetail ? `<details><summary>Details</summary><pre>${escapeHtml(fullDetail)}</pre></details>` : ""}
     </main>
   </body>
 </html>`;
@@ -866,6 +997,45 @@ async function handleCoreUpdate({ silent = false } = {}) {
   closeStatus();
 }
 
+function registerDesktopIpc() {
+  ipcMain.handle("piDesktop:getCoreStatus", async () => getCoreStatus());
+  ipcMain.handle("piDesktop:checkCoreUpdates", async () => getCoreStatus(await checkRemoteCoreVersions()));
+  ipcMain.handle("piDesktop:updateCore", async () => {
+    if (await hasBusyAgentSessions()) {
+      const error = new Error("An agent session is currently running or compacting. Stop the current run before updating Pi Core.");
+      error.code = "busy";
+      throw error;
+    }
+
+    await installCoreRuntime("Updating Pi Core packages...");
+    runtimeInfo = {
+      runtimeDir: getRuntimeDir(),
+      nodeModules: getRuntimeNodeModules(getRuntimeDir()),
+      specs: getCoreSpecs(),
+      versions: readInstalledCoreVersions(getRuntimeDir()),
+    };
+    await restartNextServer();
+    closeStatus();
+    return getCoreStatus(await checkRemoteCoreVersions().catch(() => null));
+  });
+  ipcMain.handle("piDesktop:openRuntimeFolder", async () => shell.openPath(getRuntimeDir()));
+  ipcMain.handle("piDesktop:openLogFile", async () => {
+    log("Opening desktop log");
+    return shell.openPath(getLogPath());
+  });
+  ipcMain.handle("piDesktop:selectDirectory", async () => {
+    const options = {
+      title: "Choose project folder",
+      properties: ["openDirectory"],
+    };
+    const result = mainWindow && !mainWindow.isDestroyed()
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
+}
+
 function createMainWindow(url) {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -875,6 +1045,7 @@ function createMainWindow(url) {
     title: PRODUCT_NAME,
     show: false,
     webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -962,6 +1133,7 @@ async function boot() {
 }
 
 app.whenReady().then(() => {
+  registerDesktopIpc();
   boot().catch((error) => {
     log(`${PRODUCT_NAME} failed to start`, error.stack || error.message);
     dialog.showErrorBox(`${PRODUCT_NAME} failed to start`, error.message);
