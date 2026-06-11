@@ -9,6 +9,8 @@ const net = require("net");
 const path = require("path");
 
 const PRODUCT_NAME = "Pi App";
+const GITHUB_URL = "https://github.com/Frspble/pi-app";
+const GITHUB_ISSUES_URL = `${GITHUB_URL}/issues`;
 const CORE_PACKAGES = [
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-ai",
@@ -41,6 +43,10 @@ function escapeHtml(value) {
 
 function getAppRoot() {
   return path.resolve(__dirname, "..");
+}
+
+function getAppIconPath() {
+  return path.join(getAppRoot(), "public", "app-icon.png");
 }
 
 function getRuntimeDir() {
@@ -485,6 +491,7 @@ async function showStatus(title, message, detail = "") {
       maximizable: false,
       fullscreenable: false,
       title: PRODUCT_NAME,
+      icon: getAppIconPath(),
       show: false,
       webPreferences: {
         contextIsolation: true,
@@ -1043,6 +1050,7 @@ function createMainWindow(url) {
     minWidth: 960,
     minHeight: 640,
     title: PRODUCT_NAME,
+    icon: getAppIconPath(),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -1063,6 +1071,14 @@ function createMainWindow(url) {
   mainWindow.loadURL(url);
 }
 
+function openSettingsFromMenu() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send("piDesktop:openSettings");
+}
+
 function createMenu() {
   const isMac = process.platform === "darwin";
   const template = [
@@ -1071,14 +1087,83 @@ function createMenu() {
       submenu: [
         { role: "about" },
         { type: "separator" },
+        {
+          label: "Settings...",
+          accelerator: "CmdOrCtrl+,",
+          click: openSettingsFromMenu,
+        },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
         { role: "quit" },
       ],
     }] : []),
     {
+      label: "File",
+      submenu: [
+        ...(!isMac ? [
+          {
+            label: "Settings...",
+            accelerator: "Ctrl+,",
+            click: openSettingsFromMenu,
+          },
+          { type: "separator" },
+        ] : []),
+        { role: "close" },
+        ...(!isMac ? [
+          { type: "separator" },
+          { role: "quit" },
+        ] : []),
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        ...(isMac ? [{ role: "pasteAndMatchStyle" }] : []),
+        { role: "delete" },
+        { type: "separator" },
+        { role: "selectAll" },
+        ...(isMac ? [
+          { type: "separator" },
+          {
+            label: "Speech",
+            submenu: [
+              { role: "startSpeaking" },
+              { role: "stopSpeaking" },
+            ],
+          },
+        ] : []),
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
       label: "Pi Core",
       submenu: [
         {
-          label: "Check for Updates",
+          label: "Check for Updates...",
           click: () => handleCoreUpdate({ silent: false }),
         },
         {
@@ -1087,6 +1172,7 @@ function createMenu() {
             dialog.showErrorBox("Restart failed", error.message);
           }),
         },
+        { type: "separator" },
         {
           label: "Open Runtime Folder",
           click: () => shell.openPath(getRuntimeDir()),
@@ -1101,14 +1187,29 @@ function createMenu() {
       ],
     },
     {
-      label: "View",
+      label: "Window",
       submenu: [
-        { role: "reload" },
-        { role: "toggleDevTools" },
-        { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
+        { role: "minimize" },
+        ...(isMac ? [
+          { role: "zoom" },
+          { type: "separator" },
+          { role: "front" },
+        ] : [
+          { role: "close" },
+        ]),
+      ],
+    },
+    {
+      role: "help",
+      submenu: [
+        {
+          label: "Open GitHub Repository",
+          click: () => shell.openExternal(GITHUB_URL),
+        },
+        {
+          label: "Report an Issue",
+          click: () => shell.openExternal(GITHUB_ISSUES_URL),
+        },
       ],
     },
   ];

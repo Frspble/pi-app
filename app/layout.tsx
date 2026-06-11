@@ -5,6 +5,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Pi App",
   description: "Pi Coding Agent Interface",
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/app-icon.png", type: "image/png", sizes: "512x512" },
+    ],
+    apple: [{ url: "/app-icon.png", sizes: "512x512", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({

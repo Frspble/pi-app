@@ -1,0 +1,67 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="shellBase" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(300 190) rotate(48) scale(770 760)">
+      <stop offset="0" stop-color="#60A5FA"/>
+      <stop offset="0.24" stop-color="#2563EB"/>
+      <stop offset="0.58" stop-color="#111827"/>
+      <stop offset="1" stop-color="#020617"/>
+    </radialGradient>
+    <linearGradient id="shellGlass" x1="212" y1="126" x2="846" y2="884" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.54"/>
+      <stop offset="0.22" stop-color="#DBEAFE" stop-opacity="0.28"/>
+      <stop offset="0.5" stop-color="#60A5FA" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#020617" stop-opacity="0.36"/>
+    </linearGradient>
+    <linearGradient id="shellStroke" x1="156" y1="118" x2="878" y2="904" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="0.45" stop-color="#BFDBFE" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.12"/>
+    </linearGradient>
+    <linearGradient id="markFill" x1="248" y1="226" x2="746" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.34" stop-color="#EFF6FF" stop-opacity="0.88"/>
+      <stop offset="0.68" stop-color="#BFDBFE" stop-opacity="0.74"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.95"/>
+    </linearGradient>
+    <linearGradient id="markStroke" x1="230" y1="194" x2="802" y2="802" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#60A5FA" stop-opacity="0.34"/>
+    </linearGradient>
+    <filter id="shellShadow" x="22" y="38" width="980" height="980" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="44" stdDeviation="38" flood-color="#020617" flood-opacity="0.38"/>
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#2563EB" flood-opacity="0.18"/>
+    </filter>
+    <filter id="softGlass" x="102" y="102" width="820" height="820" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="13"/>
+      <feColorMatrix type="matrix" values="1 0 0 0 0.08 0 1 0 0 0.18 0 0 1 0 0.44 0 0 0 0.24 0"/>
+      <feBlend in2="SourceGraphic" mode="screen"/>
+    </filter>
+    <filter id="markShadow" x="142" y="142" width="740" height="740" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="18" flood-color="#020617" flood-opacity="0.34"/>
+      <feDropShadow dx="0" dy="-5" stdDeviation="7" flood-color="#FFFFFF" flood-opacity="0.32"/>
+    </filter>
+    <clipPath id="shellClip">
+      <rect x="102" y="102" width="820" height="820" rx="166"/>
+    </clipPath>
+  </defs>
+
+  <g filter="url(#shellShadow)">
+    <rect x="102" y="102" width="820" height="820" rx="166" fill="url(#shellBase)"/>
+    <rect x="122" y="122" width="780" height="780" rx="152" fill="url(#shellGlass)" filter="url(#softGlass)"/>
+    <g clip-path="url(#shellClip)">
+      <path d="M158 342C212 188 340 130 505 130H706C816 130 884 205 900 318C787 249 645 236 499 270C364 301 244 346 158 342Z" fill="#FFFFFF" opacity="0.2"/>
+      <path d="M152 686C254 787 384 840 548 840C692 840 810 792 890 696C870 842 754 922 588 922H330C222 922 137 826 122 704C132 704 142 697 152 686Z" fill="#020617" opacity="0.26"/>
+      <path d="M748 138C840 184 892 260 914 358V774C872 636 804 522 708 432C598 329 460 269 294 252C412 164 582 102 748 138Z" fill="#60A5FA" opacity="0.12"/>
+    </g>
+    <rect x="122" y="122" width="780" height="780" rx="152" stroke="url(#shellStroke)" stroke-width="18"/>
+  </g>
+
+  <g filter="url(#markShadow)" transform="translate(102 102) scale(1.025)">
+    <path fill="url(#markFill)" fill-rule="evenodd" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29V165.29ZM282.65 282.65V400H400V282.65H282.65Z"/>
+    <path fill="url(#markFill)" d="M517.36 400H634.72V634.72H517.36V400Z"/>
+    <path fill="none" stroke="url(#markStroke)" stroke-width="18" stroke-linejoin="round" stroke-opacity="0.68" d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29V165.29ZM282.65 282.65V400H400V282.65H282.65Z"/>
+    <path fill="none" stroke="url(#markStroke)" stroke-width="18" stroke-linejoin="round" stroke-opacity="0.68" d="M517.36 400H634.72V634.72H517.36V400Z"/>
+    <path d="M190 186H492V234H235V492C210 460 195 418 190 366V186Z" fill="#FFFFFF" opacity="0.16"/>
+    <path d="M534 420H615V490C580 456 550 433 534 420Z" fill="#FFFFFF" opacity="0.12"/>
+  </g>
+</svg>
