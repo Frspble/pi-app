@@ -70,6 +70,11 @@ export function AppShell() {
   const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
+  useEffect(() => {
+    const unsubscribe = window.piDesktop?.onOpenSettings?.(() => setSettingsConfigOpen(true));
+    return () => unsubscribe?.();
+  }, []);
+
   const toggleTopPanel = useCallback((panel: "branches" | "system") => {
     setActiveTopPanel((cur) => cur === panel ? null : panel);
   }, []);

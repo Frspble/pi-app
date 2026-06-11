@@ -15,6 +15,7 @@
   },
   "files": [
     "bin",
+    "build",
     "electron",
     ".next/standalone",
     ".next/static",
@@ -107,6 +108,7 @@
       "dependencies": {}
     },
     "mac": {
+      "icon": "build/icon.png",
       "target": [
         "dmg",
         "zip"
@@ -114,6 +116,7 @@
       "identity": null
     },
     "win": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "nsis",

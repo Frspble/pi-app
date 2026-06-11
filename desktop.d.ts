@@ -28,6 +28,7 @@ declare global {
       openLogFile: () => Promise<string>;
       selectDirectory: () => Promise<string | null>;
       getPathForFile: (file: File) => string;
+      onOpenSettings: (callback: () => void) => () => void;
     };
   }
 }
