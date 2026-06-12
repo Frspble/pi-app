@@ -4,6 +4,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("piDesktop", {
+  platform: process.platform,
   getCoreSetupState: () => ipcRenderer.invoke("piDesktop:getCoreSetupState"),
   retryStartup: () => ipcRenderer.invoke("piDesktop:retryStartup"),
   retryCoreSetup: () => ipcRenderer.invoke("piDesktop:retryCoreSetup"),

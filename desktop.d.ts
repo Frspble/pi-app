@@ -22,6 +22,7 @@ declare global {
   type PiCoreSetupPhase = "starting" | "installing" | "ready" | "error";
   type LanguageMode = "system" | "en" | "zh";
   type ResolvedLanguage = "en" | "zh";
+  type DesktopPlatform = "darwin" | "win32" | "linux";
 
   interface PiCoreSetupState {
     phase: PiCoreSetupPhase;
@@ -33,6 +34,7 @@ declare global {
 
   interface Window {
     piDesktop?: {
+      platform: DesktopPlatform;
       getCoreSetupState: () => Promise<PiCoreSetupState>;
       retryStartup: () => Promise<PiCoreSetupState>;
       retryCoreSetup: () => Promise<PiCoreSetupState>;
