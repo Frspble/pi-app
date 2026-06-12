@@ -11,6 +11,7 @@ const path = require("path");
 const PRODUCT_NAME = "Pi App";
 const GITHUB_URL = "https://github.com/Frspble/pi-app";
 const GITHUB_ISSUES_URL = `${GITHUB_URL}/issues`;
+const USER_DATA_DIR_NAME = "PiApp";
 const CORE_PACKAGES = [
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-ai",
@@ -20,6 +21,9 @@ const NPM_TIMEOUT_MS = 10 * 60 * 1000;
 const SERVER_READY_TIMEOUT_MS = 90 * 1000;
 
 app.setName(PRODUCT_NAME);
+const userDataDir = path.join(app.getPath("appData"), USER_DATA_DIR_NAME);
+fs.mkdirSync(userDataDir, { recursive: true });
+app.setPath("userData", userDataDir);
 if (process.platform === "win32") {
   app.setAppUserModelId("works.earendil.pi-app");
 }
