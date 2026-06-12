@@ -1,8 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { useTheme, type ThemeMode } from "@/hooks/useTheme";
 
 type LoadState = "idle" | "loading" | "checking" | "updating" | "ready" | "unavailable" | "error";
+type SettingsSection = "appearance" | "core";
+
+const THEME_OPTIONS: { mode: ThemeMode; label: string; description: string }[] = [
+  { mode: "system", label: "Follow System", description: "Use the current macOS or Windows appearance." },
+  { mode: "light", label: "Light", description: "Use the bright workspace palette." },
+  { mode: "dark", label: "Dark", description: "Use the low-light workspace palette." },
+];
 
 function statusLabel(status: PiCorePackageInfo["status"]) {
   switch (status) {
@@ -30,7 +39,7 @@ function statusColor(status: PiCorePackageInfo["status"]) {
   }
 }
 
-function actionButtonStyle(disabled = false, primary = false): React.CSSProperties {
+function actionButtonStyle(disabled = false, primary = false): CSSProperties {
   return {
     height: 30,
     padding: "0 11px",
@@ -57,10 +66,75 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SectionButton({
+  active,
+  label,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: "100%",
+        height: 34,
+        display: "flex",
+        alignItems: "center",
+        gap: 9,
+        padding: "0 10px",
+        border: active ? "1px solid var(--border)" : "1px solid transparent",
+        borderRadius: 7,
+        background: active ? "var(--bg-selected)" : "none",
+        color: active ? "var(--text)" : "var(--text-muted)",
+        cursor: "pointer",
+        fontSize: 12,
+        fontWeight: active ? 600 : 500,
+        textAlign: "left",
+      }}
+    >
+      {children}
+      {label}
+    </button>
+  );
+}
+
+function AppearanceIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2" />
+      <path d="M12 20v2" />
+      <path d="M4.93 4.93l1.41 1.41" />
+      <path d="M17.66 17.66l1.41 1.41" />
+      <path d="M2 12h2" />
+      <path d="M20 12h2" />
+      <path d="M4.93 19.07l1.41-1.41" />
+      <path d="M17.66 6.34l1.41-1.41" />
+    </svg>
+  );
+}
+
+function CoreIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v18" />
+      <path d="M3 12h18" />
+      <circle cx="12" cy="12" r="7" />
+    </svg>
+  );
+}
+
 export function SettingsConfig({ onClose }: { onClose: () => void }) {
+  const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
   const [state, setState] = useState<LoadState>("idle");
   const [coreStatus, setCoreStatus] = useState<PiCoreStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const { mode, resolvedTheme, setMode } = useTheme();
 
   const desktop = typeof window !== "undefined" ? window.piDesktop : undefined;
   const hasUpdate = useMemo(
@@ -122,10 +196,13 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
     }
   }, [desktop]);
 
+  const resolvedLabel = resolvedTheme === "dark" ? "Dark" : "Light";
+  const modeLabel = mode === "system" ? "system" : mode;
+
   return (
     <div
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.38)", display: "flex", alignItems: "center", justifyContent: "center" }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -144,37 +221,25 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
       >
         <aside style={{ borderRight: "1px solid var(--border)", background: "var(--bg)", padding: 14 }}>
           <div style={{ fontSize: 18, fontWeight: 650, marginBottom: 18 }}>Settings</div>
-          <button
-            style={{
-              width: "100%",
-              height: 34,
-              display: "flex",
-              alignItems: "center",
-              gap: 9,
-              padding: "0 10px",
-              border: "1px solid var(--border)",
-              borderRadius: 7,
-              background: "var(--bg-selected)",
-              color: "var(--text)",
-              fontSize: 12,
-              fontWeight: 600,
-              textAlign: "left",
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 3v18" />
-              <path d="M3 12h18" />
-              <circle cx="12" cy="12" r="7" />
-            </svg>
-            Pi Core
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <SectionButton active={activeSection === "appearance"} label="Appearance" onClick={() => setActiveSection("appearance")}>
+              <AppearanceIcon />
+            </SectionButton>
+            <SectionButton active={activeSection === "core"} label="Pi Core" onClick={() => setActiveSection("core")}>
+              <CoreIcon />
+            </SectionButton>
+          </div>
         </aside>
 
         <main style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <header style={{ height: 54, padding: "0 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--border)" }}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 650 }}>Pi Core</div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Manage the app-owned local runtime used by Pi App.</div>
+              <div style={{ fontSize: 15, fontWeight: 650 }}>{activeSection === "appearance" ? "Appearance" : "Pi Core"}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                {activeSection === "appearance"
+                  ? "Choose how Pi App follows light and dark mode."
+                  : "Manage the app-owned local runtime used by Pi App."}
+              </div>
             </div>
             <button
               onClick={onClose}
@@ -189,7 +254,75 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
           </header>
 
           <div style={{ flex: 1, overflow: "auto", padding: 18 }}>
-            {state === "unavailable" ? (
+            {activeSection === "appearance" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <section style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "var(--bg)" }}>
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 13, fontWeight: 650 }}>Theme</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+                      Using {resolvedLabel} from {modeLabel}.
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                    {THEME_OPTIONS.map((option) => {
+                      const selected = option.mode === mode;
+                      return (
+                        <button
+                          key={option.mode}
+                          onClick={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setMode(option.mode, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+                          }}
+                          style={{
+                            minHeight: 82,
+                            padding: 12,
+                            border: selected ? "1px solid var(--accent)" : "1px solid var(--border)",
+                            borderRadius: 8,
+                            background: selected ? "var(--bg-selected)" : "var(--bg-panel)",
+                            color: "var(--text)",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            boxShadow: selected ? "0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
+                          } as CSSProperties}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 650 }}>{option.label}</span>
+                            <span
+                              style={{
+                                width: 14,
+                                height: 14,
+                                borderRadius: 999,
+                                border: selected ? "4px solid var(--accent)" : "1px solid var(--border)",
+                                background: "var(--bg)",
+                                flexShrink: 0,
+                              }}
+                            />
+                          </div>
+                          <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--text-muted)" }}>{option.description}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "var(--bg)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 650, marginBottom: 12 }}>Preview</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-panel)", padding: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 650, color: "var(--text)", marginBottom: 6 }}>Workspace surface</div>
+                      <div style={{ height: 8, width: "70%", borderRadius: 999, background: "var(--bg-hover)", marginBottom: 8 }} />
+                      <div style={{ height: 8, width: "48%", borderRadius: 999, background: "var(--bg-selected)" }} />
+                    </div>
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-panel)", padding: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 650, color: "var(--text)", marginBottom: 8 }}>Action state</div>
+                      <div style={{ display: "inline-flex", alignItems: "center", height: 26, padding: "0 10px", borderRadius: 6, background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 600 }}>
+                        Primary action
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            ) : state === "unavailable" ? (
               <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 18, color: "var(--text-muted)", fontSize: 13 }}>
                 {message}
               </div>

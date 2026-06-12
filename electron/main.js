@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 "use strict";
 
-const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require("electron");
+const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
@@ -44,6 +44,19 @@ let coreSetupState = {
   packages: [],
 };
 
+const WINDOW_THEME_COLORS = {
+  light: {
+    background: "#ffffff",
+    titleBar: "#ffffff",
+    symbol: "#182033",
+  },
+  dark: {
+    background: "#151923",
+    titleBar: "#151923",
+    symbol: "#e6eaf2",
+  },
+};
+
 if (!gotSingleInstanceLock) {
   app.quit();
 }
@@ -74,6 +87,27 @@ function emitCoreSetupState(nextState = {}) {
 function sendCoreSetupStateToWindow(window) {
   if (!window || window.isDestroyed()) return;
   window.webContents.send("piDesktop:coreSetupState", coreSetupState);
+}
+
+function applyWindowTheme(theme) {
+  const resolvedTheme = theme === "dark" ? "dark" : "light";
+  const colors = WINDOW_THEME_COLORS[resolvedTheme];
+  nativeTheme.themeSource = resolvedTheme;
+
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    window.setBackgroundColor(colors.background);
+    if (typeof window.setTitleBarOverlay === "function") {
+      try {
+        window.setTitleBarOverlay({
+          color: colors.titleBar,
+          symbolColor: colors.symbol,
+        });
+      } catch {
+        // Title bar overlay is unavailable unless the platform/window style supports it.
+      }
+    }
+  }
 }
 
 function escapeHtml(value) {
@@ -1292,9 +1326,14 @@ function registerDesktopIpc() {
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
   });
+  ipcMain.handle("piDesktop:setTheme", async (_event, theme) => {
+    applyWindowTheme(theme);
+    return null;
+  });
 }
 
 function createMainWindow() {
+  const initialTheme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -1303,6 +1342,7 @@ function createMainWindow() {
     title: PRODUCT_NAME,
     icon: getAppIconPath(),
     show: false,
+    backgroundColor: WINDOW_THEME_COLORS[initialTheme].background,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   openLogFile: () => ipcRenderer.invoke("piDesktop:openLogFile"),
   selectDirectory: () => ipcRenderer.invoke("piDesktop:selectDirectory"),
   getPathForFile: (file) => webUtils.getPathForFile(file),
+  setTheme: (theme) => ipcRenderer.invoke("piDesktop:setTheme", theme),
   onOpenSettings: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("piDesktop:openSettings", listener);
