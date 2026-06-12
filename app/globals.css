@@ -19,37 +19,39 @@
 }
 
 :root {
-  --bg: #ffffff;
-  --bg-panel: #f5f5f5;
-  --bg-hover: #eeeeee;
-  --bg-selected: #e8e8e8;
-  --border: #e0e0e0;
-  --text: #1a1a1a;
-  --text-muted: #6b7280;
-  --text-dim: #9ca3af;
+  color-scheme: light;
+  --bg: #fbfcfe;
+  --bg-panel: #f4f6fa;
+  --bg-hover: #e9edf5;
+  --bg-selected: #dfe7f3;
+  --border: #d8dee9;
+  --text: #141820;
+  --text-muted: #5f6b7a;
+  --text-dim: #98a2b3;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
-  --user-bg: #eff6ff;
+  --user-bg: #eaf2ff;
   --assistant-bg: #ffffff;
-  --tool-bg: #f9fafb;
-  --bg-subtle: rgba(0,0,0,0.03);
+  --tool-bg: #f6f8fb;
+  --bg-subtle: rgba(20,24,32,0.035);
 }
 
 html.dark {
-  --bg: #1a1a1a;
-  --bg-panel: #242424;
-  --bg-hover: #2e2e2e;
-  --bg-selected: #383838;
-  --border: #3a3a3a;
-  --text: #e8e8e8;
-  --text-muted: #9ca3af;
-  --text-dim: #6b7280;
-  --accent: #60a5fa;
-  --accent-hover: #93c5fd;
-  --user-bg: #1e293b;
-  --assistant-bg: #1a1a1a;
-  --tool-bg: #1f2937;
-  --bg-subtle: rgba(255,255,255,0.04);
+  color-scheme: dark;
+  --bg: #0f1117;
+  --bg-panel: #151923;
+  --bg-hover: #1d2330;
+  --bg-selected: #253044;
+  --border: #2b3445;
+  --text: #e6eaf2;
+  --text-muted: #a2adbf;
+  --text-dim: #6f7b8e;
+  --accent: #7aa7ff;
+  --accent-hover: #a9c6ff;
+  --user-bg: #17243a;
+  --assistant-bg: #0f1117;
+  --tool-bg: #151c29;
+  --bg-subtle: rgba(230,234,242,0.045);
 }
 
 /* Theme toggle: circular wipe via View Transitions API.

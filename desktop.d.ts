@@ -42,6 +42,7 @@ declare global {
       openLogFile: () => Promise<string>;
       selectDirectory: () => Promise<string | null>;
       getPathForFile: (file: File) => string;
+      setTheme: (theme: "light" | "dark") => Promise<null>;
       onOpenSettings: (callback: () => void) => () => void;
       onCoreSetupState: (callback: (state: PiCoreSetupState) => void) => () => void;
     };
