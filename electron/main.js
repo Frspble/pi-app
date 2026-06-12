@@ -19,6 +19,7 @@ const CORE_PACKAGES = [
 const CORE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const NPM_TIMEOUT_MS = 10 * 60 * 1000;
 const SERVER_READY_TIMEOUT_MS = 90 * 1000;
+const TITLE_BAR_HEIGHT = 36;
 
 app.setName(PRODUCT_NAME);
 const userDataDir = path.join(app.getPath("appData"), USER_DATA_DIR_NAME);
@@ -268,6 +269,7 @@ function applyWindowTheme(mode, fallback) {
         window.setTitleBarOverlay({
           color: colors.titleBar,
           symbolColor: colors.symbol,
+          height: TITLE_BAR_HEIGHT,
         });
       } catch {
         // Title bar overlay is unavailable unless the platform/window style supports it.
@@ -1549,6 +1551,18 @@ function registerDesktopIpc() {
 
 function createMainWindow() {
   const initialTheme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
+  const titleBarStyle = process.platform === "darwin"
+    ? "hiddenInset"
+    : process.platform === "win32"
+      ? "hidden"
+      : undefined;
+  const titleBarOverlay = process.platform === "win32"
+    ? {
+        color: WINDOW_THEME_COLORS[initialTheme].titleBar,
+        symbolColor: WINDOW_THEME_COLORS[initialTheme].symbol,
+        height: TITLE_BAR_HEIGHT,
+      }
+    : undefined;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -1557,6 +1571,8 @@ function createMainWindow() {
     title: PRODUCT_NAME,
     icon: getAppIconPath(),
     show: false,
+    ...(titleBarStyle ? { titleBarStyle } : {}),
+    ...(titleBarOverlay ? { titleBarOverlay } : {}),
     backgroundColor: WINDOW_THEME_COLORS[initialTheme].background,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

@@ -422,6 +422,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Header */}
       <div
+        className="session-sidebar-header"
         style={{
           padding: "12px 10px 10px",
           borderBottom: "1px solid var(--border)",

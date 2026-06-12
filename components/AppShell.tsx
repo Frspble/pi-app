@@ -171,6 +171,7 @@ export function AppShell() {
   const [coreSetupState, setCoreSetupState] = useState<PiCoreSetupState | null>(null);
   const [desktopRuntimeChecked, setDesktopRuntimeChecked] = useState(false);
   const [hasDesktopSetupApi, setHasDesktopSetupApi] = useState(false);
+  const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform | null>(null);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
   const coreReady = desktopRuntimeChecked && (!hasDesktopSetupApi || coreSetupState?.phase === "ready");
@@ -216,6 +217,10 @@ export function AppShell() {
   useEffect(() => {
     const unsubscribe = window.piDesktop?.onOpenSettings?.(() => setSettingsConfigOpen(true));
     return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
+    setDesktopPlatform(window.piDesktop?.platform ?? null);
   }, []);
 
   useEffect(() => {
@@ -513,7 +518,10 @@ export function AppShell() {
 
   return (
     <>
-    <div style={{ display: "flex", height: "100dvh", overflow: "hidden", background: "var(--bg)" }}>
+    <div
+      className={desktopPlatform ? `app-root desktop-chrome desktop-platform-${desktopPlatform}` : "app-root"}
+      style={{ display: "flex", height: "100dvh", overflow: "hidden", background: "var(--bg)" }}
+    >
       {/* Mobile overlay backdrop */}
       <div
         className="sidebar-overlay-backdrop"
@@ -545,9 +553,9 @@ export function AppShell() {
       </div>
 
       {/* Center: chat */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+      <div className="app-main" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar toggle */}
-        <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36, background: "var(--bg-panel)" }}>
+        <div ref={topBarRef} className="app-titlebar" style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36, background: "var(--bg-panel)" }}>
           <button
             onClick={() => setSidebarOpen((v) => !v)}
             title={sidebarOpen ? t("app.hideSidebar") : t("app.showSidebar")}
@@ -747,7 +755,7 @@ export function AppShell() {
           })()}
           {/* Top panel dropdown — shared, only one active at a time */}
           {activeTopPanel && topPanelPos && (
-            <div style={{
+            <div className="no-window-drag" style={{
               position: "fixed",
               top: topPanelPos.top,
               left: topPanelPos.left,
@@ -843,7 +851,7 @@ export function AppShell() {
         }}
       >
         {/* Right panel tab bar */}
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
+        <div className="right-panel-titlebar no-window-drag" style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
           <div style={{ flex: 1, overflow: "hidden" }}>
             <TabBar
               tabs={fileTabs}
@@ -869,6 +877,7 @@ export function AppShell() {
     </div>
     {/* File panel toggle — always visible at top-right */}
     <button
+      className="file-panel-toggle no-window-drag"
       onClick={() => setRightPanelOpen((v) => !v)}
       title={rightPanelOpen ? t("app.hideFilePanel") : t("app.showFilePanel")}
       style={{

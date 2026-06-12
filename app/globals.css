@@ -111,6 +111,45 @@ pre, code {
   font-family: var(--font-mono);
 }
 
+.desktop-chrome .app-titlebar {
+  -webkit-app-region: drag;
+}
+
+.desktop-chrome button,
+.desktop-chrome input,
+.desktop-chrome textarea,
+.desktop-chrome select,
+.desktop-chrome a,
+.desktop-chrome [role="button"],
+.desktop-chrome .no-window-drag {
+  -webkit-app-region: no-drag;
+}
+
+.desktop-platform-darwin .session-sidebar-header {
+  padding-top: 40px !important;
+  -webkit-app-region: drag;
+}
+
+.desktop-platform-darwin .sidebar-container.sidebar-closed + .app-main .app-titlebar::before {
+  content: "";
+  width: 78px;
+  height: 36px;
+  flex: 0 0 78px;
+  pointer-events: none;
+}
+
+.desktop-platform-win32 .app-titlebar {
+  padding-right: 138px;
+}
+
+.desktop-platform-win32 .file-panel-toggle {
+  right: 138px !important;
+}
+
+.desktop-platform-win32 .right-panel-titlebar {
+  padding-right: 138px;
+}
+
 /* react-markdown output styles */
 .markdown-body {
   font-size: 14px;
