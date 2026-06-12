@@ -249,10 +249,16 @@ function sendCoreSetupStateToWindow(window) {
   window.webContents.send("piDesktop:coreSetupState", coreSetupState);
 }
 
-function applyWindowTheme(theme) {
-  const resolvedTheme = theme === "dark" ? "dark" : "light";
+function resolveDesktopTheme(mode, fallback) {
+  if (mode === "dark" || mode === "light") return mode;
+  if (fallback === "dark" || fallback === "light") return fallback;
+  return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+}
+
+function applyWindowTheme(mode, fallback) {
+  const resolvedTheme = resolveDesktopTheme(mode, fallback);
   const colors = WINDOW_THEME_COLORS[resolvedTheme];
-  nativeTheme.themeSource = resolvedTheme;
+  nativeTheme.themeSource = mode === "system" ? "system" : resolvedTheme;
 
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;
@@ -1017,6 +1023,10 @@ function startCoreSetup() {
     });
     runtimeInfo = await prepareCoreRuntimeWithRetry();
     log("Pi Core runtime ready", JSON.stringify(runtimeInfo.versions, null, 2));
+    linkCorePackagesIntoStandalone(runtimeInfo);
+    if (serverUrl) {
+      await restartNextServer();
+    }
     emitCoreSetupState({
       phase: "ready",
       message: desktopT("startup.coreReady"),
@@ -1118,6 +1128,37 @@ function getRuntimeStandaloneDir(runtimeDir) {
   return path.join(runtimeDir, "standalone");
 }
 
+function getCorePackagePath(nodeModulesDir, packageName) {
+  return path.join(nodeModulesDir, ...packageName.split("/"));
+}
+
+function linkCorePackagesIntoStandalone(info = runtimeInfo) {
+  if (!info?.runtimeDir) return;
+  const runtimeNodeModules = getRuntimeNodeModules(info.runtimeDir);
+  const standaloneNodeModules = path.join(getRuntimeStandaloneDir(info.runtimeDir), "node_modules");
+  if (!fs.existsSync(standaloneNodeModules)) return;
+
+  for (const packageName of CORE_PACKAGES) {
+    const source = getCorePackagePath(runtimeNodeModules, packageName);
+    const target = getCorePackagePath(standaloneNodeModules, packageName);
+    if (!fs.existsSync(path.join(source, "package.json"))) continue;
+
+    try {
+      if (fs.existsSync(target)) {
+        const realTarget = fs.realpathSync(target);
+        const realSource = fs.realpathSync(source);
+        if (realTarget === realSource) continue;
+        fs.rmSync(target, { recursive: true, force: true });
+      }
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.symlinkSync(source, target, process.platform === "win32" ? "junction" : "dir");
+      log("Linked Pi Core package into standalone runtime", `${packageName}\nsource=${source}\ntarget=${target}`);
+    } catch (error) {
+      throw new Error(`Could not link ${packageName} into the standalone runtime.\n\n${error.message}`);
+    }
+  }
+}
+
 function syncRuntimeStandalone(appRoot, runtimeDir) {
   const packagedStandalone = path.join(appRoot, ".next", "standalone");
   const runtimeStandalone = getRuntimeStandaloneDir(runtimeDir);
@@ -1187,6 +1228,7 @@ async function doStartNextServer() {
   const standaloneServer = devMode
     ? packagedStandaloneServer
     : syncRuntimeStandalone(appRoot, runtimeInfo.runtimeDir);
+  if (!devMode) linkCorePackagesIntoStandalone(runtimeInfo);
   const command = getNodeCommand();
   const mode = devMode ? "dev" : "standalone";
   const args = devMode
@@ -1486,8 +1528,8 @@ function registerDesktopIpc() {
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
   });
-  ipcMain.handle("piDesktop:setTheme", async (_event, theme) => {
-    applyWindowTheme(theme);
+  ipcMain.handle("piDesktop:setTheme", async (_event, mode, resolvedTheme) => {
+    applyWindowTheme(mode, resolvedTheme);
     return null;
   });
   ipcMain.handle("piDesktop:getLanguageMode", async () => getLanguageMode());
@@ -1709,6 +1751,11 @@ async function boot() {
 app.whenReady().then(() => {
   if (!gotSingleInstanceLock) return;
   registerDesktopIpc();
+  nativeTheme.on("updated", () => {
+    if (nativeTheme.themeSource === "system") {
+      applyWindowTheme("system");
+    }
+  });
   boot().catch((error) => {
     log(`${PRODUCT_NAME} failed to start`, error.stack || error.message);
     if (mainWindow && !mainWindow.isDestroyed()) {

@@ -44,7 +44,7 @@ declare global {
       openLogFile: () => Promise<string>;
       selectDirectory: () => Promise<string | null>;
       getPathForFile: (file: File) => string;
-      setTheme: (theme: "light" | "dark") => Promise<null>;
+      setTheme: (mode: "system" | "light" | "dark", resolvedTheme: "light" | "dark") => Promise<null>;
       getLanguageMode: () => Promise<LanguageMode | null>;
       setLanguageMode: (mode: LanguageMode, resolved: ResolvedLanguage) => Promise<null>;
       onOpenSettings: (callback: () => void) => () => void;

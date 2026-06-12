@@ -155,7 +155,7 @@ function PiCoreStartupOverlay({ state }: { state: PiCoreSetupState | null }) {
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { resolvedTheme } = useTheme();
+  const { mode: themeMode, resolvedTheme } = useTheme();
   const { t } = useI18n();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
@@ -219,8 +219,8 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    void window.piDesktop?.setTheme?.(resolvedTheme);
-  }, [resolvedTheme]);
+    void window.piDesktop?.setTheme?.(themeMode, resolvedTheme);
+  }, [themeMode, resolvedTheme]);
 
   useEffect(() => {
     const desktop = window.piDesktop;
