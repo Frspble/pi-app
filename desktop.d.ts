@@ -19,8 +19,22 @@ declare global {
     packages: PiCorePackageInfo[];
   }
 
+  type PiCoreSetupPhase = "starting" | "installing" | "ready" | "error";
+
+  interface PiCoreSetupState {
+    phase: PiCoreSetupPhase;
+    message: string;
+    detail: string;
+    runtimeDir: string | null;
+    packages: PiCorePackageInfo[];
+  }
+
   interface Window {
     piDesktop?: {
+      getCoreSetupState: () => Promise<PiCoreSetupState>;
+      retryStartup: () => Promise<PiCoreSetupState>;
+      retryCoreSetup: () => Promise<PiCoreSetupState>;
+      quit: () => Promise<null>;
       getCoreStatus: () => Promise<PiCoreStatus>;
       checkCoreUpdates: () => Promise<PiCoreStatus>;
       updateCore: () => Promise<PiCoreStatus>;
@@ -29,6 +43,7 @@ declare global {
       selectDirectory: () => Promise<string | null>;
       getPathForFile: (file: File) => string;
       onOpenSettings: (callback: () => void) => () => void;
+      onCoreSetupState: (callback: (state: PiCoreSetupState) => void) => () => void;
     };
   }
 }

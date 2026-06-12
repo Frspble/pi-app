@@ -25,13 +25,56 @@ if (process.platform === "win32") {
 }
 
 let mainWindow = null;
-let statusWindow = null;
 let nextProcess = null;
+let nextStartupPromise = null;
 let serverUrl = null;
 let runtimeInfo = null;
+let isLoadingLocalShell = false;
 let isBooting = false;
 let isStoppingForQuit = false;
-let statusLoadId = 0;
+let localShellLoadId = 0;
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+let coreSetupPromise = null;
+let coreUpdateInterval = null;
+let coreSetupState = {
+  phase: "starting",
+  message: "Starting Pi App...",
+  detail: "",
+  runtimeDir: null,
+  packages: [],
+};
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+
+function getCorePackagesSafe() {
+  try {
+    return getCoreStatus().packages;
+  } catch {
+    return [];
+  }
+}
+
+function emitCoreSetupState(nextState = {}) {
+  coreSetupState = {
+    ...coreSetupState,
+    ...nextState,
+    runtimeDir: nextState.runtimeDir ?? runtimeInfo?.runtimeDir ?? coreSetupState.runtimeDir,
+    packages: nextState.packages ?? getCorePackagesSafe(),
+  };
+
+  for (const window of BrowserWindow.getAllWindows()) {
+    sendCoreSetupStateToWindow(window);
+  }
+
+  return coreSetupState;
+}
+
+function sendCoreSetupStateToWindow(window) {
+  if (!window || window.isDestroyed()) return;
+  window.webContents.send("piDesktop:coreSetupState", coreSetupState);
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -231,6 +274,34 @@ function runCommand(command, args, options = {}) {
   });
 }
 
+function getNpmInvocation() {
+  const npmCommand = getNpmCommand();
+  if (process.platform === "win32" && /\.cmd$/i.test(npmCommand)) {
+    const npmCli = path.join(path.dirname(npmCommand), "node_modules", "npm", "bin", "npm-cli.js");
+    if (fs.existsSync(npmCli)) {
+      return {
+        command: getNodeCommand(),
+        args: [npmCli],
+        shell: false,
+      };
+    }
+  }
+
+  return {
+    command: npmCommand,
+    args: [],
+    shell: process.platform === "win32",
+  };
+}
+
+function runNpmCommand(args, options = {}) {
+  const npm = getNpmInvocation();
+  return runCommand(npm.command, [...npm.args, ...args], {
+    ...options,
+    shell: npm.shell,
+  });
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
@@ -329,6 +400,18 @@ function missingCorePackages(versions) {
   return CORE_PACKAGES.filter((name) => !versions[name]);
 }
 
+function getInitialRuntimeInfo() {
+  const runtimeDir = getRuntimeDir();
+  const specs = getCoreSpecs();
+  ensureRuntimePackageJson(runtimeDir, specs);
+  return {
+    runtimeDir,
+    nodeModules: getRuntimeNodeModules(runtimeDir),
+    specs,
+    versions: readInstalledCoreVersions(runtimeDir),
+  };
+}
+
 function summarizeStatusDetail(detail) {
   const lines = String(detail || "")
     .split(/\r?\n/)
@@ -337,9 +420,24 @@ function summarizeStatusDetail(detail) {
   return lines.at(-1) || "";
 }
 
-function createStatusHtml(title, message, detail = "") {
+function createLocalShellHtml(title, message, detail = "", options = {}) {
   const summary = summarizeStatusDetail(detail);
   const fullDetail = String(detail || "").slice(-4000);
+  const isError = options.variant === "error";
+  const retryScript = isError
+    ? `
+      <script>
+        const invoke = (channel) => {
+          if (window.piDesktop) {
+            window.piDesktop[channel]?.();
+            return;
+          }
+          if (window.electronAPI) {
+            window.electronAPI[channel]?.();
+          }
+        };
+      </script>`
+    : "";
   return `<!doctype html>
 <html>
   <head>
@@ -363,7 +461,7 @@ function createStatusHtml(title, message, detail = "") {
         box-sizing: border-box;
         padding: 28px;
         border: 1px solid rgba(25, 35, 58, 0.1);
-        border-radius: 18px;
+        border-radius: 12px;
         background: rgba(255, 255, 255, 0.86);
         box-shadow: 0 24px 70px rgba(27, 38, 67, 0.16);
         line-height: 1.5;
@@ -390,8 +488,8 @@ function createStatusHtml(title, message, detail = "") {
       .mark {
         width: 12px;
         height: 12px;
-        border-radius: 50%;
-        background: #3457d5;
+        border-radius: 4px;
+        background: ${isError ? "#dc2626" : "#3457d5"};
         box-shadow: 0 0 0 5px rgba(52, 87, 213, 0.12);
       }
       .bar {
@@ -408,8 +506,8 @@ function createStatusHtml(title, message, detail = "") {
         inset: 0 auto 0 0;
         width: 42%;
         border-radius: inherit;
-        background: linear-gradient(90deg, #3457d5, #26a69a);
-        animation: slide 1.25s ease-in-out infinite;
+        background: ${isError ? "#dc2626" : "linear-gradient(90deg, #3457d5, #26a69a)"};
+        animation: ${isError ? "none" : "slide 1.25s ease-in-out infinite"};
       }
       .summary {
         min-height: 18px;
@@ -440,6 +538,29 @@ function createStatusHtml(title, message, detail = "") {
         font-size: 11px;
         white-space: pre-wrap;
       }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 18px;
+      }
+      button {
+        height: 30px;
+        padding: 0 12px;
+        border: 1px solid #d7deea;
+        border-radius: 6px;
+        background: #fff;
+        color: #182033;
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      button.primary {
+        border-color: #3457d5;
+        background: #3457d5;
+        color: #fff;
+        font-weight: 700;
+      }
       @keyframes slide {
         0% { transform: translateX(-110%); }
         55% { transform: translateX(80%); }
@@ -460,6 +581,15 @@ function createStatusHtml(title, message, detail = "") {
         p { color: #aeb7ca; }
         .bar { background: #273144; }
         .summary, details { color: #8e99ad; }
+        button {
+          border-color: #2b3548;
+          background: #111827;
+          color: #eef2ff;
+        }
+        button.primary {
+          border-color: #4967ff;
+          background: #4967ff;
+        }
         pre {
           border-color: #2b3548;
           background: #0b1020;
@@ -476,50 +606,47 @@ function createStatusHtml(title, message, detail = "") {
       <div class="bar" aria-hidden="true"></div>
       <div class="summary">${summary ? escapeHtml(summary) : "Preparing local runtime..."}</div>
       ${fullDetail ? `<details><summary>Details</summary><pre>${escapeHtml(fullDetail)}</pre></details>` : ""}
+      ${isError ? `
+        <div class="actions">
+          <button onclick="invoke('openLogFile')">Open Log</button>
+          <button onclick="invoke('quit')">Quit</button>
+          <button class="primary" onclick="invoke('retryStartup')">Retry</button>
+        </div>
+      ` : ""}
     </main>
+    ${retryScript}
   </body>
 </html>`;
 }
 
-async function showStatus(title, message, detail = "") {
-  const loadId = ++statusLoadId;
-  if (!statusWindow || statusWindow.isDestroyed()) {
-    statusWindow = new BrowserWindow({
-      width: 520,
-      height: 320,
-      resizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      title: PRODUCT_NAME,
-      icon: getAppIconPath(),
-      show: false,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    });
-  }
-  const html = createStatusHtml(title, message, detail);
+async function loadLocalShell(title, message, detail = "", options = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const loadId = ++localShellLoadId;
+  isLoadingLocalShell = true;
+  const html = createLocalShellHtml(title, message, detail, options);
   try {
-    await statusWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   } catch (error) {
     const messageText = String(error?.message || error);
     if (!messageText.includes("ERR_ABORTED") && !messageText.includes("ERR_FAILED")) {
       throw error;
     }
   }
-  if (loadId === statusLoadId && !statusWindow.isDestroyed() && !statusWindow.isVisible()) {
-    statusWindow.show();
+  if (loadId === localShellLoadId && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+    mainWindow.show();
   }
 }
 
-function closeStatus() {
-  statusLoadId++;
-  if (statusWindow && !statusWindow.isDestroyed()) {
-    statusWindow.close();
-  }
-  statusWindow = null;
+function focusWindow(window) {
+  if (!window || window.isDestroyed()) return false;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  return true;
+}
+
+function focusExistingInstance() {
+  if (focusWindow(mainWindow)) return;
 }
 
 function waitForHttp(url, timeoutMs = 30_000) {
@@ -578,10 +705,9 @@ async function ensureNodeAvailable() {
 async function ensureNpmAvailable() {
   const env = withDesktopPath();
   try {
-    await runCommand(getNpmCommand(), ["--version"], {
+    await runNpmCommand(["--version"], {
       env,
       timeout: 15_000,
-      shell: process.platform === "win32",
     });
   } catch (error) {
     throw new Error(`npm is required to install Pi Core. Install npm, then retry.\n\n${error.message}`);
@@ -597,6 +723,12 @@ async function installCoreRuntime(reason) {
   const runtimeDir = getRuntimeDir();
   const specs = getCoreSpecs();
   ensureRuntimePackageJson(runtimeDir, specs);
+  emitCoreSetupState({
+    phase: "installing",
+    message: reason,
+    detail: "Checking local Node.js and npm...",
+    runtimeDir,
+  });
   await ensureToolingAvailable();
 
   const args = [
@@ -606,19 +738,23 @@ async function installCoreRuntime(reason) {
     ...specs.map((spec) => `${spec.name}@${spec.range}`),
   ];
   let detail = "";
-  await showStatus(PRODUCT_NAME, reason, `npm ${args.join(" ")}`);
-  await runCommand(getNpmCommand(), args, {
+  emitCoreSetupState({
+    phase: "installing",
+    message: reason,
+    detail: `npm ${args.join(" ")}`,
+    runtimeDir,
+  });
+  await runNpmCommand(args, {
     cwd: runtimeDir,
     env: withDesktopPath({ ...process.env, FORCE_COLOR: "0" }),
     timeout: NPM_TIMEOUT_MS,
-    shell: process.platform === "win32",
     onStdout: async (text) => {
       detail += text;
-      await showStatus(PRODUCT_NAME, reason, detail);
+      emitCoreSetupState({ phase: "installing", message: reason, detail, runtimeDir });
     },
     onStderr: async (text) => {
       detail += text;
-      await showStatus(PRODUCT_NAME, reason, detail);
+      emitCoreSetupState({ phase: "installing", message: reason, detail, runtimeDir });
     },
   });
 
@@ -643,6 +779,12 @@ async function prepareCoreRuntime() {
   const versions = readInstalledCoreVersions(runtimeDir);
   const missing = missingCorePackages(versions);
   if (missing.length === 0) {
+    emitCoreSetupState({
+      phase: "ready",
+      message: "Pi Core runtime ready",
+      detail: "",
+      runtimeDir,
+    });
     return {
       runtimeDir,
       nodeModules: getRuntimeNodeModules(runtimeDir),
@@ -658,20 +800,52 @@ async function prepareCoreRuntimeWithRetry() {
     try {
       return await prepareCoreRuntime();
     } catch (error) {
-      const result = await dialog.showMessageBox({
-        type: "error",
-        title: "Pi Core setup failed",
+      emitCoreSetupState({
+        phase: "error",
         message: "Pi Core could not be installed.",
-        detail: error.message,
-        buttons: ["Retry", "Quit"],
-        defaultId: 0,
-        cancelId: 1,
+        detail: error.stack || error.message || String(error),
+        runtimeDir: getRuntimeDir(),
       });
-      if (result.response === 0) continue;
-      app.quit();
       throw error;
     }
   }
+}
+
+function startCoreSetup() {
+  if (coreSetupPromise) return coreSetupPromise;
+
+  coreSetupPromise = (async () => {
+    emitCoreSetupState({
+      phase: "starting",
+      message: "Preparing Pi Core runtime...",
+      detail: "",
+      runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
+    });
+    runtimeInfo = await prepareCoreRuntimeWithRetry();
+    log("Pi Core runtime ready", JSON.stringify(runtimeInfo.versions, null, 2));
+    emitCoreSetupState({
+      phase: "ready",
+      message: "Pi Core runtime ready",
+      detail: "",
+      runtimeDir: runtimeInfo.runtimeDir,
+    });
+    setTimeout(() => handleCoreUpdate({ silent: true }), 3000);
+    if (!coreUpdateInterval) {
+      coreUpdateInterval = setInterval(() => handleCoreUpdate({ silent: true }), CORE_CHECK_INTERVAL_MS);
+    }
+    return runtimeInfo;
+  })().catch((error) => {
+    coreSetupPromise = null;
+    emitCoreSetupState({
+      phase: "error",
+      message: "Pi Core could not be installed.",
+      detail: error.stack || error.message || String(error),
+      runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
+    });
+    throw error;
+  });
+
+  return coreSetupPromise;
 }
 
 function compareSemver(a, b) {
@@ -701,10 +875,9 @@ async function checkRemoteCoreVersions() {
   const specs = getCoreSpecs();
   const remote = {};
   for (const spec of specs) {
-    const { stdout } = await runCommand(getNpmCommand(), ["view", `${spec.name}@${spec.range}`, "version", "--json"], {
+    const { stdout } = await runNpmCommand(["view", `${spec.name}@${spec.range}`, "version", "--json"], {
       env: withDesktopPath({ ...process.env, FORCE_COLOR: "0" }),
       timeout: 45_000,
-      shell: process.platform === "win32",
     });
     remote[spec.name] = newestVersionFromNpmJson(stdout);
   }
@@ -779,14 +952,23 @@ function buildNodePath(runtimeNodeModules) {
   ].filter(Boolean).join(path.delimiter);
 }
 
-async function startNextServer() {
-  if (nextProcess) return serverUrl;
+function startNextServer() {
+  if (serverUrl) return serverUrl;
+  if (nextStartupPromise) return nextStartupPromise;
+
+  nextStartupPromise = doStartNextServer()
+    .finally(() => {
+      nextStartupPromise = null;
+    });
+  return nextStartupPromise;
+}
+
+async function doStartNextServer() {
   if (serverUrl) return serverUrl;
 
   const externalServerUrl = getExternalServerUrl();
   if (externalServerUrl) {
     log(`Using external development server: ${externalServerUrl}`);
-    await showStatus(PRODUCT_NAME, "Connecting to local development server...", externalServerUrl);
     await waitForHttp(externalServerUrl);
     serverUrl = externalServerUrl;
     return serverUrl;
@@ -807,6 +989,7 @@ async function startNextServer() {
     throw new Error("Next.js standalone server was not found. Run npm run build before packaging.");
   }
 
+  if (!runtimeInfo) runtimeInfo = getInitialRuntimeInfo();
   const standaloneServer = devMode
     ? packagedStandaloneServer
     : syncRuntimeStandalone(appRoot, runtimeInfo.runtimeDir);
@@ -825,7 +1008,6 @@ async function startNextServer() {
   });
 
   log(`Starting Next.js ${mode} server`, `node=${command}\nargs=${args.join(" ")}\nport=${port}\nruntime=${runtimeInfo.runtimeDir}`);
-  await showStatus(PRODUCT_NAME, `Starting local ${devMode ? "development" : "production"} server...`);
 
   return new Promise((resolve, reject) => {
     let ready = false;
@@ -846,9 +1028,6 @@ async function startNextServer() {
       const text = chunk.toString();
       output += text;
       log("Next.js output", text.trim());
-      showStatus(PRODUCT_NAME, "Starting local server...", output).catch((error) => {
-        log("Failed to update status window", error.stack || error.message);
-      });
       if (!ready && /ready|started server|local:/i.test(output)) {
         ready = true;
         clearTimeout(timer);
@@ -862,6 +1041,7 @@ async function startNextServer() {
     nextProcess.on("error", (error) => {
       clearTimeout(timer);
       nextProcess = null;
+      serverUrl = null;
       reject(error);
     });
     nextProcess.on("exit", (code) => {
@@ -933,11 +1113,36 @@ async function restartNextServer() {
   await stopNextServer();
   const url = await startNextServer();
   if (mainWindow && !mainWindow.isDestroyed()) {
+    isLoadingLocalShell = false;
     await mainWindow.loadURL(url);
   }
 }
 
+async function loadMainAppWhenReady() {
+  try {
+    await loadLocalShell(
+      "Starting Pi App",
+      "Starting the local app service...",
+      coreSetupState.detail || "",
+    );
+    const url = await startNextServer();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    isLoadingLocalShell = false;
+    await mainWindow.loadURL(url);
+  } catch (error) {
+    const detail = error.stack || error.message || String(error);
+    log("Pi App local service failed to start", detail);
+    await loadLocalShell(
+      "Pi App could not start",
+      "The local app service failed to start.",
+      detail,
+      { variant: "error" },
+    );
+  }
+}
+
 async function handleCoreUpdate({ silent = false } = {}) {
+  if (coreSetupState.phase !== "ready") return;
   let remote;
   try {
     remote = await checkRemoteCoreVersions();
@@ -993,6 +1198,12 @@ async function handleCoreUpdate({ silent = false } = {}) {
   });
   if (result.response !== 0) return;
 
+  emitCoreSetupState({
+    phase: "installing",
+    message: "Updating Pi Core packages...",
+    detail: "",
+    runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
+  });
   await installCoreRuntime("Updating Pi Core packages...");
   runtimeInfo = {
     runtimeDir: getRuntimeDir(),
@@ -1001,10 +1212,39 @@ async function handleCoreUpdate({ silent = false } = {}) {
     versions: readInstalledCoreVersions(getRuntimeDir()),
   };
   await restartNextServer();
-  closeStatus();
+  emitCoreSetupState({
+    phase: "ready",
+    message: "Pi Core runtime ready",
+    detail: "",
+    runtimeDir: runtimeInfo.runtimeDir,
+  });
 }
 
 function registerDesktopIpc() {
+  ipcMain.handle("piDesktop:getCoreSetupState", async () => coreSetupState);
+  ipcMain.handle("piDesktop:retryCoreSetup", async () => {
+    startCoreSetup().catch((error) => {
+      log("Pi Core setup failed", error.stack || error.message);
+    });
+    return coreSetupState;
+  });
+  ipcMain.handle("piDesktop:retryStartup", async () => {
+    if (isLoadingLocalShell || !serverUrl) {
+      loadMainAppWhenReady().catch((error) => {
+        log("Pi App startup retry failed", error.stack || error.message);
+      });
+    }
+    if (coreSetupState.phase === "error") {
+      startCoreSetup().catch((error) => {
+        log("Pi Core setup retry failed", error.stack || error.message);
+      });
+    }
+    return coreSetupState;
+  });
+  ipcMain.handle("piDesktop:quit", async () => {
+    app.quit();
+    return null;
+  });
   ipcMain.handle("piDesktop:getCoreStatus", async () => getCoreStatus());
   ipcMain.handle("piDesktop:checkCoreUpdates", async () => getCoreStatus(await checkRemoteCoreVersions()));
   ipcMain.handle("piDesktop:updateCore", async () => {
@@ -1014,6 +1254,12 @@ function registerDesktopIpc() {
       throw error;
     }
 
+    emitCoreSetupState({
+      phase: "installing",
+      message: "Updating Pi Core packages...",
+      detail: "",
+      runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
+    });
     await installCoreRuntime("Updating Pi Core packages...");
     runtimeInfo = {
       runtimeDir: getRuntimeDir(),
@@ -1022,7 +1268,12 @@ function registerDesktopIpc() {
       versions: readInstalledCoreVersions(getRuntimeDir()),
     };
     await restartNextServer();
-    closeStatus();
+    emitCoreSetupState({
+      phase: "ready",
+      message: "Pi Core runtime ready",
+      detail: "",
+      runtimeDir: runtimeInfo.runtimeDir,
+    });
     return getCoreStatus(await checkRemoteCoreVersions().catch(() => null));
   });
   ipcMain.handle("piDesktop:openRuntimeFolder", async () => shell.openPath(getRuntimeDir()));
@@ -1043,7 +1294,7 @@ function registerDesktopIpc() {
   });
 }
 
-function createMainWindow(url) {
+function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -1064,11 +1315,13 @@ function createMainWindow(url) {
     shell.openExternal(targetUrl);
     return { action: "deny" };
   });
+  mainWindow.webContents.on("did-finish-load", () => {
+    sendCoreSetupStateToWindow(mainWindow);
+  });
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
-  mainWindow.loadURL(url);
 }
 
 function openSettingsFromMenu() {
@@ -1219,33 +1472,68 @@ function createMenu() {
 async function boot() {
   isBooting = true;
   try {
+    runtimeInfo = getInitialRuntimeInfo();
+    emitCoreSetupState({
+      phase: "starting",
+      message: "Starting Pi App...",
+      detail: "",
+      runtimeDir: runtimeInfo.runtimeDir,
+    });
     log(`${PRODUCT_NAME} booting`, `userData=${app.getPath("userData")}\nnode=${getNodeCommand()}\nnpm=${getNpmCommand()}\nPATH=${withDesktopPath().PATH}`);
-    runtimeInfo = await prepareCoreRuntimeWithRetry();
-    log("Pi Core runtime ready", JSON.stringify(runtimeInfo.versions, null, 2));
-    const url = await startNextServer();
-    closeStatus();
     createMenu();
-    createMainWindow(url);
-    setTimeout(() => handleCoreUpdate({ silent: true }), 3000);
-    setInterval(() => handleCoreUpdate({ silent: true }), CORE_CHECK_INTERVAL_MS);
+    createMainWindow();
+    loadMainAppWhenReady().catch((error) => {
+      log("Pi App local service failed to start", error.stack || error.message);
+    });
+    startCoreSetup().catch((error) => {
+      log("Pi Core setup failed", error.stack || error.message);
+    });
   } finally {
     isBooting = false;
   }
 }
 
 app.whenReady().then(() => {
+  if (!gotSingleInstanceLock) return;
   registerDesktopIpc();
   boot().catch((error) => {
     log(`${PRODUCT_NAME} failed to start`, error.stack || error.message);
-    dialog.showErrorBox(`${PRODUCT_NAME} failed to start`, error.message);
-    app.quit();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      loadLocalShell(
+        "Pi App could not start",
+        "Startup failed before the app service could be prepared.",
+        error.stack || error.message || String(error),
+        { variant: "error" },
+      ).catch(() => {
+        dialog.showErrorBox(`${PRODUCT_NAME} failed to start`, error.message);
+      });
+    } else {
+      dialog.showErrorBox(`${PRODUCT_NAME} failed to start`, error.message);
+      app.quit();
+    }
   });
 });
 
+app.on("second-instance", () => {
+  focusExistingInstance();
+});
+
 app.on("activate", () => {
-  if (!mainWindow && serverUrl) {
-    createMainWindow(serverUrl);
+  if (!mainWindow) {
+    createMainWindow();
+    if (serverUrl) {
+      isLoadingLocalShell = false;
+      mainWindow.loadURL(serverUrl).catch((error) => {
+        log("Failed to load existing app service", error.stack || error.message);
+      });
+    } else {
+      loadMainAppWhenReady().catch((error) => {
+        log("Pi App local service failed to start", error.stack || error.message);
+      });
+    }
+    return;
   }
+  focusExistingInstance();
 });
 
 app.on("before-quit", (event) => {
