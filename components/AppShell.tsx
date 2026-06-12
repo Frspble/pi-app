@@ -11,10 +11,12 @@ import { SkillsConfig } from "./SkillsConfig";
 import { SettingsConfig } from "./SettingsConfig";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
+import { useI18n } from "@/hooks/useI18n";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
 function PiCoreStartupOverlay({ state }: { state: PiCoreSetupState | null }) {
+  const { t } = useI18n();
   const phase = state?.phase ?? "starting";
   const isError = phase === "error";
   const detailLines = (state?.detail ?? "")
@@ -91,9 +93,9 @@ function PiCoreStartupOverlay({ state }: { state: PiCoreSetupState | null }) {
               )}
             </div>
             <div>
-              <div style={{ fontSize: 16, fontWeight: 700 }}>{isError ? "Pi Core setup failed" : "Preparing Pi Core"}</div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{isError ? t("startup.coreFailed") : t("startup.preparingCore")}</div>
               <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
-                {state?.message ?? "Starting Pi App..."}
+                {state?.message ?? t("startup.starting")}
               </div>
             </div>
           </div>
@@ -132,9 +134,9 @@ function PiCoreStartupOverlay({ state }: { state: PiCoreSetupState | null }) {
           )}
           {isError && (
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
-              <button onClick={openLog} style={{ height: 30, padding: "0 11px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>Open Log</button>
-              <button onClick={quit} style={{ height: 30, padding: "0 11px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>Quit</button>
-              <button onClick={retry} style={{ height: 30, padding: "0 12px", borderRadius: 6, border: "1px solid var(--accent)", background: "var(--accent)", color: "white", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Retry</button>
+              <button onClick={openLog} style={{ height: 30, padding: "0 11px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>{t("core.openLog")}</button>
+              <button onClick={quit} style={{ height: 30, padding: "0 11px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>{t("common.quit")}</button>
+              <button onClick={retry} style={{ height: 30, padding: "0 12px", borderRadius: 6, border: "1px solid var(--accent)", background: "var(--accent)", color: "white", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>{t("common.retry")}</button>
             </div>
           )}
         </div>
@@ -154,6 +156,7 @@ export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { resolvedTheme } = useTheme();
+  const { t } = useI18n();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
@@ -240,7 +243,7 @@ export function AppShell() {
         if (!cancelled) {
           setCoreSetupState({
             phase: "ready",
-            message: "Desktop runtime unavailable",
+            message: t("startup.runtimeUnavailable"),
             detail: "",
             runtimeDir: null,
             packages: [],
@@ -253,7 +256,7 @@ export function AppShell() {
       cancelled = true;
       unsubscribe?.();
     };
-  }, []);
+  }, [t]);
 
   const toggleTopPanel = useCallback((panel: "branches" | "system") => {
     setActiveTopPanel((cur) => cur === panel ? null : panel);
@@ -448,7 +451,7 @@ export function AppShell() {
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
           {
-            label: "Models",
+            label: t("common.models"),
             onClick: () => setModelsConfigOpen(true),
             disabled: !coreReady,
             icon: (
@@ -462,7 +465,7 @@ export function AppShell() {
             ),
           },
           {
-            label: "Skills",
+            label: t("common.skills"),
             onClick: () => setSkillsConfigOpen(true),
             disabled: !coreReady || (!activeCwd && !selectedSession?.cwd && !newSessionCwd),
             icon: (
@@ -474,7 +477,7 @@ export function AppShell() {
             ),
           },
           {
-            label: "Settings",
+            label: t("common.settings"),
             onClick: () => setSettingsConfigOpen(true),
             disabled: !coreReady,
             icon: (
@@ -547,7 +550,7 @@ export function AppShell() {
         <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36, background: "var(--bg-panel)" }}>
           <button
             onClick={() => setSidebarOpen((v) => !v)}
-            title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            title={sidebarOpen ? t("app.hideSidebar") : t("app.showSidebar")}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: 36, height: 36, padding: 0,
@@ -572,8 +575,8 @@ export function AppShell() {
               <button
                 onClick={handleExportSession}
                 disabled={!selectedSession}
-                title={selectedSession ? "Export HTML" : "Export is available after the session is saved"}
-                aria-label="Export HTML"
+                title={selectedSession ? t("app.exportHtml") : t("app.exportUnavailable")}
+                aria-label={t("app.exportHtml")}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -619,7 +622,7 @@ export function AppShell() {
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
                 </span>
-                <span>Export</span>
+                <span>{t("app.export")}</span>
               </button>
               <BranchNavigator
                 tree={branchTree}
@@ -654,7 +657,7 @@ export function AppShell() {
                   <line x1="8" y1="13" x2="16" y2="13" />
                   <line x1="8" y1="17" x2="13" y2="17" />
                 </svg>
-                <span>System</span>
+                <span>{t("app.system")}</span>
               </button>
             </div>
           )}
@@ -771,11 +774,11 @@ export function AppShell() {
                     </div>
                   ) : systemPrompt === "" ? (
                     <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-                      System prompt is empty (tools are disabled)
+                      {t("app.systemPromptEmpty")}
                     </div>
                   ) : (
                     <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-                      Send a message to load the system prompt
+                      {t("app.systemPromptLoad")}
                     </div>
                   )}
                 </div>
@@ -789,7 +792,7 @@ export function AppShell() {
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
           {!coreReady ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
-              Pi App is opening...
+              {t("startup.opening")}
             </div>
           ) : showChat ? (
             <ChatWindow
@@ -809,7 +812,7 @@ export function AppShell() {
           ) : showPlaceholder ? (
             activeCwd ? (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 15 }}>
-                Select a session from the sidebar
+                {t("app.selectSession")}
               </div>
             ) : (
               <div style={{ position: "absolute", top: 12, left: 12, display: "flex", alignItems: "flex-start", gap: 8, userSelect: "none", pointerEvents: "none" }}>
@@ -817,10 +820,10 @@ export function AppShell() {
                   <line x1="20" y1="12" x2="4" y2="12" /><polyline points="10 6 4 12 10 18" />
                 </svg>
                 <div>
-                  <div style={{ fontSize: 18, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>Get Started</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>{t("app.getStarted")}</div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.8 }}>
-                    <span style={{ color: "var(--text-dim)", marginRight: 6 }}>1.</span>Select a project directory from the sidebar<br />
-                    <span style={{ color: "var(--text-dim)", marginRight: 6 }}>2.</span>Add models via the <strong style={{ color: "var(--text)" }}>Models</strong> button at the bottom
+                    <span style={{ color: "var(--text-dim)", marginRight: 6 }}>1.</span>{t("app.getStartedStep1")}<br />
+                    <span style={{ color: "var(--text-dim)", marginRight: 6 }}>2.</span>{t("app.getStartedStep2Prefix")} <strong style={{ color: "var(--text)" }}>{t("common.models")}</strong> {t("app.getStartedStep2Suffix")}
                   </div>
                 </div>
               </div>
@@ -858,7 +861,7 @@ export function AppShell() {
             <FileViewer filePath={activeFileTab.filePath} cwd={activeCwd ?? undefined} />
           ) : (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-              {coreReady ? "No file open" : "Pi Core is starting"}
+              {coreReady ? t("app.noFileOpen") : t("app.coreStarting")}
             </div>
           )}
         </div>
@@ -867,7 +870,7 @@ export function AppShell() {
     {/* File panel toggle — always visible at top-right */}
     <button
       onClick={() => setRightPanelOpen((v) => !v)}
-      title={rightPanelOpen ? "Hide file panel" : "Show file panel"}
+      title={rightPanelOpen ? t("app.hideFilePanel") : t("app.showFilePanel")}
       style={{
         position: "fixed", top: 0, right: 0, zIndex: 300,
         display: "flex", alignItems: "center", justifyContent: "center",

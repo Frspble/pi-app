@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   selectDirectory: () => ipcRenderer.invoke("piDesktop:selectDirectory"),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   setTheme: (theme) => ipcRenderer.invoke("piDesktop:setTheme", theme),
+  getLanguageMode: () => ipcRenderer.invoke("piDesktop:getLanguageMode"),
+  setLanguageMode: (mode, resolved) => ipcRenderer.invoke("piDesktop:setLanguageMode", mode, resolved),
   onOpenSettings: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("piDesktop:openSettings", listener);

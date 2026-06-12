@@ -61,8 +61,164 @@ const WINDOW_THEME_COLORS = {
   },
 };
 
+const DESKTOP_TRANSLATIONS = {
+  en: {
+    "startup.starting": "Starting Pi App...",
+    "startup.startingService": "Starting the local app service...",
+    "startup.serviceFailedTitle": "Pi App could not start",
+    "startup.serviceFailedMessage": "The local app service failed to start.",
+    "startup.bootFailedMessage": "Startup failed before the app service could be prepared.",
+    "startup.preparingRuntime": "Preparing local runtime...",
+    "startup.preparingCore": "Preparing Pi Core runtime...",
+    "startup.checkingTooling": "Checking local Node.js and npm...",
+    "startup.coreReady": "Pi Core runtime ready",
+    "startup.installingCore": "Installing Pi Core packages: {packages}",
+    "startup.coreInstallFailed": "Pi Core could not be installed.",
+    "startup.updatingCore": "Updating Pi Core packages...",
+    "startup.details": "Details",
+    "common.openLog": "Open Log",
+    "common.quit": "Quit",
+    "common.retry": "Retry",
+    "common.update": "Update",
+    "common.cancel": "Cancel",
+    "common.missing": "missing",
+    "dialog.nodeRequired": "Node.js is required to run Pi App. Install Node.js, then retry.",
+    "dialog.npmRequired": "npm is required to install Pi Core. Install npm, then retry.",
+    "dialog.updateCheckFailedTitle": "Pi Core update check failed",
+    "dialog.updateCheckFailedMessage": "Could not check npm for Pi Core updates.",
+    "dialog.upToDateTitle": "Pi Core is up to date",
+    "dialog.upToDateMessage": "Pi Core is already on the latest compatible version.",
+    "dialog.updatePostponedTitle": "Pi Core update postponed",
+    "dialog.updatePostponedMessage": "An agent session is currently running or compacting.",
+    "dialog.updatePostponedDetail": "Stop the current run before updating Pi Core.",
+    "dialog.updateQuestionTitle": "Update Pi Core?",
+    "dialog.updateQuestionMessage": "A compatible Pi Core update is available.",
+    "dialog.busyError": "An agent session is currently running or compacting. Stop the current run before updating Pi Core.",
+    "dialog.chooseProjectFolder": "Choose project folder",
+    "dialog.restartFailed": "Restart failed",
+    "menu.settings": "Settings...",
+    "menu.file": "File",
+    "menu.edit": "Edit",
+    "menu.view": "View",
+    "menu.piCore": "Pi Core",
+    "menu.checkUpdates": "Check for Updates...",
+    "menu.restartService": "Restart Local Service",
+    "menu.openRuntime": "Open Runtime Folder",
+    "menu.openLog": "Open Log File",
+    "menu.window": "Window",
+    "menu.helpGithub": "Open GitHub Repository",
+    "menu.helpIssue": "Report an Issue",
+  },
+  zh: {
+    "startup.starting": "正在启动 Pi App...",
+    "startup.startingService": "正在启动本地 App 服务...",
+    "startup.serviceFailedTitle": "Pi App 无法启动",
+    "startup.serviceFailedMessage": "本地 App 服务启动失败。",
+    "startup.bootFailedMessage": "App 服务准备前启动失败。",
+    "startup.preparingRuntime": "正在准备本地运行时...",
+    "startup.preparingCore": "正在准备 Pi Core 运行时...",
+    "startup.checkingTooling": "正在检查本地 Node.js 和 npm...",
+    "startup.coreReady": "Pi Core 运行时已就绪",
+    "startup.installingCore": "正在安装 Pi Core 包：{packages}",
+    "startup.coreInstallFailed": "Pi Core 无法安装。",
+    "startup.updatingCore": "正在更新 Pi Core 包...",
+    "startup.details": "详情",
+    "common.openLog": "打开日志",
+    "common.quit": "退出",
+    "common.retry": "重试",
+    "common.update": "更新",
+    "common.cancel": "取消",
+    "common.missing": "未安装",
+    "dialog.nodeRequired": "Pi App 需要 Node.js 才能运行。请安装 Node.js 后重试。",
+    "dialog.npmRequired": "安装 Pi Core 需要 npm。请安装 npm 后重试。",
+    "dialog.updateCheckFailedTitle": "Pi Core 更新检查失败",
+    "dialog.updateCheckFailedMessage": "无法从 npm 检查 Pi Core 更新。",
+    "dialog.upToDateTitle": "Pi Core 已是最新",
+    "dialog.upToDateMessage": "Pi Core 已经是最新兼容版本。",
+    "dialog.updatePostponedTitle": "Pi Core 更新已暂停",
+    "dialog.updatePostponedMessage": "当前有 Agent 会话正在运行或压缩。",
+    "dialog.updatePostponedDetail": "请停止当前运行后再更新 Pi Core。",
+    "dialog.updateQuestionTitle": "更新 Pi Core？",
+    "dialog.updateQuestionMessage": "发现兼容的 Pi Core 更新。",
+    "dialog.busyError": "当前有 Agent 会话正在运行或压缩。请停止当前运行后再更新 Pi Core。",
+    "dialog.chooseProjectFolder": "选择项目文件夹",
+    "dialog.restartFailed": "重启失败",
+    "menu.settings": "设置...",
+    "menu.file": "文件",
+    "menu.edit": "编辑",
+    "menu.view": "视图",
+    "menu.piCore": "Pi Core",
+    "menu.checkUpdates": "检查更新...",
+    "menu.restartService": "重启本地服务",
+    "menu.openRuntime": "打开运行时文件夹",
+    "menu.openLog": "打开日志文件",
+    "menu.window": "窗口",
+    "menu.helpGithub": "打开 GitHub 仓库",
+    "menu.helpIssue": "报告问题",
+  },
+};
+
 if (!gotSingleInstanceLock) {
   app.quit();
+}
+
+function isLanguageMode(value) {
+  return value === "system" || value === "en" || value === "zh";
+}
+
+function isResolvedLanguage(value) {
+  return value === "en" || value === "zh";
+}
+
+function resolveSystemLanguage() {
+  try {
+    return app.getLocale().toLowerCase().startsWith("zh") ? "zh" : "en";
+  } catch {
+    return "en";
+  }
+}
+
+function getPreferencesPath() {
+  return path.join(app.getPath("userData"), "desktop-preferences.json");
+}
+
+function readDesktopPreferences() {
+  try {
+    const parsed = readJson(getPreferencesPath());
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeDesktopPreferences(nextPrefs) {
+  const prefsPath = getPreferencesPath();
+  const prefs = {
+    ...readDesktopPreferences(),
+    ...nextPrefs,
+  };
+  fs.mkdirSync(path.dirname(prefsPath), { recursive: true });
+  fs.writeFileSync(prefsPath, `${JSON.stringify(prefs, null, 2)}\n`);
+}
+
+function getLanguageMode() {
+  const mode = readDesktopPreferences().languageMode;
+  return isLanguageMode(mode) ? mode : "system";
+}
+
+function getResolvedLanguage() {
+  const mode = getLanguageMode();
+  if (mode !== "system") return mode;
+  return resolveSystemLanguage();
+}
+
+function desktopT(key, params = {}) {
+  const language = getResolvedLanguage();
+  const dictionary = DESKTOP_TRANSLATIONS[language] ?? DESKTOP_TRANSLATIONS.en;
+  const template = dictionary[key] ?? DESKTOP_TRANSLATIONS.en[key] ?? key;
+  return template.replace(/\{(\w+)\}/g, (match, name) => (
+    params[name] == null ? match : String(params[name])
+  ));
 }
 
 function getCorePackagesSafe() {
@@ -642,13 +798,13 @@ function createLocalShellHtml(title, message, detail = "", options = {}) {
       <h1>${escapeHtml(title)}</h1>
       <p>${escapeHtml(message)}</p>
       <div class="bar" aria-hidden="true"></div>
-      <div class="summary">${summary ? escapeHtml(summary) : "Preparing local runtime..."}</div>
-      ${fullDetail ? `<details><summary>Details</summary><pre>${escapeHtml(fullDetail)}</pre></details>` : ""}
+      <div class="summary">${summary ? escapeHtml(summary) : escapeHtml(desktopT("startup.preparingRuntime"))}</div>
+      ${fullDetail ? `<details><summary>${escapeHtml(desktopT("startup.details"))}</summary><pre>${escapeHtml(fullDetail)}</pre></details>` : ""}
       ${isError ? `
         <div class="actions">
-          <button onclick="invoke('openLogFile')">Open Log</button>
-          <button onclick="invoke('quit')">Quit</button>
-          <button class="primary" onclick="invoke('retryStartup')">Retry</button>
+          <button onclick="invoke('openLogFile')">${escapeHtml(desktopT("common.openLog"))}</button>
+          <button onclick="invoke('quit')">${escapeHtml(desktopT("common.quit"))}</button>
+          <button class="primary" onclick="invoke('retryStartup')">${escapeHtml(desktopT("common.retry"))}</button>
         </div>
       ` : ""}
     </main>
@@ -736,7 +892,7 @@ async function ensureNodeAvailable() {
       shell: false,
     });
   } catch (error) {
-    throw new Error(`Node.js is required to run ${PRODUCT_NAME}. Install Node.js, then retry.\n\n${error.message}`);
+    throw new Error(`${desktopT("dialog.nodeRequired")}\n\n${error.message}`);
   }
 }
 
@@ -748,7 +904,7 @@ async function ensureNpmAvailable() {
       timeout: 15_000,
     });
   } catch (error) {
-    throw new Error(`npm is required to install Pi Core. Install npm, then retry.\n\n${error.message}`);
+    throw new Error(`${desktopT("dialog.npmRequired")}\n\n${error.message}`);
   }
 }
 
@@ -764,7 +920,7 @@ async function installCoreRuntime(reason) {
   emitCoreSetupState({
     phase: "installing",
     message: reason,
-    detail: "Checking local Node.js and npm...",
+    detail: desktopT("startup.checkingTooling"),
     runtimeDir,
   });
   await ensureToolingAvailable();
@@ -819,7 +975,7 @@ async function prepareCoreRuntime() {
   if (missing.length === 0) {
     emitCoreSetupState({
       phase: "ready",
-      message: "Pi Core runtime ready",
+      message: desktopT("startup.coreReady"),
       detail: "",
       runtimeDir,
     });
@@ -830,7 +986,7 @@ async function prepareCoreRuntime() {
       versions,
     };
   }
-  return installCoreRuntime(`Installing Pi Core packages: ${missing.join(", ")}`);
+  return installCoreRuntime(desktopT("startup.installingCore", { packages: missing.join(", ") }));
 }
 
 async function prepareCoreRuntimeWithRetry() {
@@ -840,7 +996,7 @@ async function prepareCoreRuntimeWithRetry() {
     } catch (error) {
       emitCoreSetupState({
         phase: "error",
-        message: "Pi Core could not be installed.",
+        message: desktopT("startup.coreInstallFailed"),
         detail: error.stack || error.message || String(error),
         runtimeDir: getRuntimeDir(),
       });
@@ -855,7 +1011,7 @@ function startCoreSetup() {
   coreSetupPromise = (async () => {
     emitCoreSetupState({
       phase: "starting",
-      message: "Preparing Pi Core runtime...",
+      message: desktopT("startup.preparingCore"),
       detail: "",
       runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
     });
@@ -863,7 +1019,7 @@ function startCoreSetup() {
     log("Pi Core runtime ready", JSON.stringify(runtimeInfo.versions, null, 2));
     emitCoreSetupState({
       phase: "ready",
-      message: "Pi Core runtime ready",
+      message: desktopT("startup.coreReady"),
       detail: "",
       runtimeDir: runtimeInfo.runtimeDir,
     });
@@ -876,7 +1032,7 @@ function startCoreSetup() {
     coreSetupPromise = null;
     emitCoreSetupState({
       phase: "error",
-      message: "Pi Core could not be installed.",
+      message: desktopT("startup.coreInstallFailed"),
       detail: error.stack || error.message || String(error),
       runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
     });
@@ -1159,8 +1315,8 @@ async function restartNextServer() {
 async function loadMainAppWhenReady() {
   try {
     await loadLocalShell(
-      "Starting Pi App",
-      "Starting the local app service...",
+      desktopT("startup.starting"),
+      desktopT("startup.startingService"),
       coreSetupState.detail || "",
     );
     const url = await startNextServer();
@@ -1171,8 +1327,8 @@ async function loadMainAppWhenReady() {
     const detail = error.stack || error.message || String(error);
     log("Pi App local service failed to start", detail);
     await loadLocalShell(
-      "Pi App could not start",
-      "The local app service failed to start.",
+      desktopT("startup.serviceFailedTitle"),
+      desktopT("startup.serviceFailedMessage"),
       detail,
       { variant: "error" },
     );
@@ -1188,8 +1344,8 @@ async function handleCoreUpdate({ silent = false } = {}) {
     if (!silent) {
       await dialog.showMessageBox({
         type: "warning",
-        title: "Pi Core update check failed",
-        message: "Could not check npm for Pi Core updates.",
+        title: desktopT("dialog.updateCheckFailedTitle"),
+        message: desktopT("dialog.updateCheckFailedMessage"),
         detail: error.message,
       });
     }
@@ -1205,9 +1361,9 @@ async function handleCoreUpdate({ silent = false } = {}) {
     if (!silent) {
       await dialog.showMessageBox({
         type: "info",
-        title: "Pi Core is up to date",
-        message: "Pi Core is already on the latest compatible version.",
-        detail: CORE_PACKAGES.map((name) => `${name}: ${installed[name] ?? "not installed"}`).join("\n"),
+        title: desktopT("dialog.upToDateTitle"),
+        message: desktopT("dialog.upToDateMessage"),
+        detail: CORE_PACKAGES.map((name) => `${name}: ${installed[name] ?? desktopT("common.missing")}`).join("\n"),
       });
     }
     return;
@@ -1218,19 +1374,19 @@ async function handleCoreUpdate({ silent = false } = {}) {
   if (await hasBusyAgentSessions()) {
     await dialog.showMessageBox({
       type: "warning",
-      title: "Pi Core update postponed",
-      message: "An agent session is currently running or compacting.",
-      detail: "Stop the current run before updating Pi Core.",
+      title: desktopT("dialog.updatePostponedTitle"),
+      message: desktopT("dialog.updatePostponedMessage"),
+      detail: desktopT("dialog.updatePostponedDetail"),
     });
     return;
   }
 
   const result = await dialog.showMessageBox({
     type: "question",
-    title: "Update Pi Core?",
-    message: "A compatible Pi Core update is available.",
-    detail: updates.map((item) => `${item.name}: ${item.installed ?? "missing"} -> ${item.remote}`).join("\n"),
-    buttons: ["Update", "Cancel"],
+    title: desktopT("dialog.updateQuestionTitle"),
+    message: desktopT("dialog.updateQuestionMessage"),
+    detail: updates.map((item) => `${item.name}: ${item.installed ?? desktopT("common.missing")} -> ${item.remote}`).join("\n"),
+    buttons: [desktopT("common.update"), desktopT("common.cancel")],
     defaultId: 0,
     cancelId: 1,
   });
@@ -1238,11 +1394,11 @@ async function handleCoreUpdate({ silent = false } = {}) {
 
   emitCoreSetupState({
     phase: "installing",
-    message: "Updating Pi Core packages...",
+    message: desktopT("startup.updatingCore"),
     detail: "",
     runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
   });
-  await installCoreRuntime("Updating Pi Core packages...");
+  await installCoreRuntime(desktopT("startup.updatingCore"));
   runtimeInfo = {
     runtimeDir: getRuntimeDir(),
     nodeModules: getRuntimeNodeModules(getRuntimeDir()),
@@ -1252,7 +1408,7 @@ async function handleCoreUpdate({ silent = false } = {}) {
   await restartNextServer();
   emitCoreSetupState({
     phase: "ready",
-    message: "Pi Core runtime ready",
+    message: desktopT("startup.coreReady"),
     detail: "",
     runtimeDir: runtimeInfo.runtimeDir,
   });
@@ -1287,18 +1443,18 @@ function registerDesktopIpc() {
   ipcMain.handle("piDesktop:checkCoreUpdates", async () => getCoreStatus(await checkRemoteCoreVersions()));
   ipcMain.handle("piDesktop:updateCore", async () => {
     if (await hasBusyAgentSessions()) {
-      const error = new Error("An agent session is currently running or compacting. Stop the current run before updating Pi Core.");
+      const error = new Error(desktopT("dialog.busyError"));
       error.code = "busy";
       throw error;
     }
 
     emitCoreSetupState({
       phase: "installing",
-      message: "Updating Pi Core packages...",
+      message: desktopT("startup.updatingCore"),
       detail: "",
       runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
     });
-    await installCoreRuntime("Updating Pi Core packages...");
+    await installCoreRuntime(desktopT("startup.updatingCore"));
     runtimeInfo = {
       runtimeDir: getRuntimeDir(),
       nodeModules: getRuntimeNodeModules(getRuntimeDir()),
@@ -1308,7 +1464,7 @@ function registerDesktopIpc() {
     await restartNextServer();
     emitCoreSetupState({
       phase: "ready",
-      message: "Pi Core runtime ready",
+      message: desktopT("startup.coreReady"),
       detail: "",
       runtimeDir: runtimeInfo.runtimeDir,
     });
@@ -1321,7 +1477,7 @@ function registerDesktopIpc() {
   });
   ipcMain.handle("piDesktop:selectDirectory", async () => {
     const options = {
-      title: "Choose project folder",
+      title: desktopT("dialog.chooseProjectFolder"),
       properties: ["openDirectory"],
     };
     const result = mainWindow && !mainWindow.isDestroyed()
@@ -1332,6 +1488,19 @@ function registerDesktopIpc() {
   });
   ipcMain.handle("piDesktop:setTheme", async (_event, theme) => {
     applyWindowTheme(theme);
+    return null;
+  });
+  ipcMain.handle("piDesktop:getLanguageMode", async () => getLanguageMode());
+  ipcMain.handle("piDesktop:setLanguageMode", async (_event, mode, resolved) => {
+    if (!isLanguageMode(mode)) return null;
+    writeDesktopPreferences({
+      languageMode: mode,
+      resolvedLanguage: isResolvedLanguage(resolved) ? resolved : resolveSystemLanguage(),
+    });
+    createMenu();
+    if (coreSetupState.phase === "starting" && coreSetupState.message === DESKTOP_TRANSLATIONS.en["startup.starting"]) {
+      emitCoreSetupState({ message: desktopT("startup.starting") });
+    }
     return null;
   });
 }
@@ -1385,7 +1554,7 @@ function createMenu() {
         { role: "about" },
         { type: "separator" },
         {
-          label: "Settings...",
+          label: desktopT("menu.settings"),
           accelerator: "CmdOrCtrl+,",
           click: openSettingsFromMenu,
         },
@@ -1400,11 +1569,11 @@ function createMenu() {
       ],
     }] : []),
     {
-      label: "File",
+      label: desktopT("menu.file"),
       submenu: [
         ...(!isMac ? [
           {
-            label: "Settings...",
+            label: desktopT("menu.settings"),
             accelerator: "Ctrl+,",
             click: openSettingsFromMenu,
           },
@@ -1418,7 +1587,7 @@ function createMenu() {
       ],
     },
     {
-      label: "Edit",
+      label: desktopT("menu.edit"),
       submenu: [
         { role: "undo" },
         { role: "redo" },
@@ -1443,7 +1612,7 @@ function createMenu() {
       ],
     },
     {
-      label: "View",
+      label: desktopT("menu.view"),
       submenu: [
         { role: "reload" },
         { role: "forceReload" },
@@ -1457,25 +1626,25 @@ function createMenu() {
       ],
     },
     {
-      label: "Pi Core",
+      label: desktopT("menu.piCore"),
       submenu: [
         {
-          label: "Check for Updates...",
+          label: desktopT("menu.checkUpdates"),
           click: () => handleCoreUpdate({ silent: false }),
         },
         {
-          label: "Restart Local Service",
+          label: desktopT("menu.restartService"),
           click: () => restartNextServer().catch((error) => {
-            dialog.showErrorBox("Restart failed", error.message);
+            dialog.showErrorBox(desktopT("dialog.restartFailed"), error.message);
           }),
         },
         { type: "separator" },
         {
-          label: "Open Runtime Folder",
+          label: desktopT("menu.openRuntime"),
           click: () => shell.openPath(getRuntimeDir()),
         },
         {
-          label: "Open Log File",
+          label: desktopT("menu.openLog"),
           click: () => {
             log("Opening desktop log");
             shell.openPath(getLogPath());
@@ -1484,7 +1653,7 @@ function createMenu() {
       ],
     },
     {
-      label: "Window",
+      label: desktopT("menu.window"),
       submenu: [
         { role: "minimize" },
         ...(isMac ? [
@@ -1500,11 +1669,11 @@ function createMenu() {
       role: "help",
       submenu: [
         {
-          label: "Open GitHub Repository",
+          label: desktopT("menu.helpGithub"),
           click: () => shell.openExternal(GITHUB_URL),
         },
         {
-          label: "Report an Issue",
+          label: desktopT("menu.helpIssue"),
           click: () => shell.openExternal(GITHUB_ISSUES_URL),
         },
       ],
@@ -1519,7 +1688,7 @@ async function boot() {
     runtimeInfo = getInitialRuntimeInfo();
     emitCoreSetupState({
       phase: "starting",
-      message: "Starting Pi App...",
+      message: desktopT("startup.starting"),
       detail: "",
       runtimeDir: runtimeInfo.runtimeDir,
     });
@@ -1544,8 +1713,8 @@ app.whenReady().then(() => {
     log(`${PRODUCT_NAME} failed to start`, error.stack || error.message);
     if (mainWindow && !mainWindow.isDestroyed()) {
       loadLocalShell(
-        "Pi App could not start",
-        "Startup failed before the app service could be prepared.",
+        desktopT("startup.serviceFailedTitle"),
+        desktopT("startup.bootFailedMessage"),
         error.stack || error.message || String(error),
         { variant: "error" },
       ).catch(() => {
