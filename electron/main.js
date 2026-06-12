@@ -40,6 +40,7 @@ let isStoppingForQuit = false;
 let localShellLoadId = 0;
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 let coreSetupPromise = null;
+let coreStandaloneSyncPromise = null;
 let coreUpdateInterval = null;
 let coreSetupState = {
   phase: "starting",
@@ -71,6 +72,7 @@ const DESKTOP_TRANSLATIONS = {
     "startup.bootFailedMessage": "Startup failed before the app service could be prepared.",
     "startup.preparingRuntime": "Preparing local runtime...",
     "startup.preparingCore": "Preparing Pi Core runtime...",
+    "startup.syncingCore": "Preparing Pi Core runtime files...",
     "startup.checkingTooling": "Checking local Node.js and npm...",
     "startup.coreReady": "Pi Core runtime ready",
     "startup.installingCore": "Installing Pi Core packages: {packages}",
@@ -118,6 +120,7 @@ const DESKTOP_TRANSLATIONS = {
     "startup.bootFailedMessage": "App 服务准备前启动失败。",
     "startup.preparingRuntime": "正在准备本地运行时...",
     "startup.preparingCore": "正在准备 Pi Core 运行时...",
+    "startup.syncingCore": "正在准备 Pi Core 运行文件...",
     "startup.checkingTooling": "正在检查本地 Node.js 和 npm...",
     "startup.coreReady": "Pi Core 运行时已就绪",
     "startup.installingCore": "正在安装 Pi Core 包：{packages}",
@@ -557,9 +560,11 @@ function ensureRuntimePackageJson(runtimeDir, specs) {
 function readInstalledCoreVersions(runtimeDir) {
   const versions = {};
   for (const name of CORE_PACKAGES) {
-    const pkgPath = path.join(runtimeDir, "node_modules", ...name.split("/"), "package.json");
+    const packageDir = getCorePackagePath(getRuntimeNodeModules(runtimeDir), name);
+    const pkgPath = path.join(packageDir, "package.json");
     try {
-      versions[name] = readJson(pkgPath).version ?? null;
+      const pkg = readJson(pkgPath);
+      versions[name] = hasValidPackageEntry(packageDir, pkg) ? (pkg.version ?? null) : null;
     } catch {
       versions[name] = null;
     }
@@ -600,6 +605,42 @@ function getCoreStatus(remote = null) {
 
 function missingCorePackages(versions) {
   return CORE_PACKAGES.filter((name) => !versions[name]);
+}
+
+function getPackageEntryCandidates(pkg) {
+  const candidates = [];
+  const rootExport = pkg.exports?.["."];
+  if (typeof rootExport === "string") candidates.push(rootExport);
+  else if (rootExport && typeof rootExport === "object") {
+    if (typeof rootExport.import === "string") candidates.push(rootExport.import);
+    if (typeof rootExport.default === "string") candidates.push(rootExport.default);
+    if (typeof rootExport.require === "string") candidates.push(rootExport.require);
+  }
+  if (typeof pkg.module === "string") candidates.push(pkg.module);
+  if (typeof pkg.main === "string") candidates.push(pkg.main);
+  candidates.push("index.js");
+  return candidates;
+}
+
+function hasValidPackageEntry(packageDir, pkg = readJson(path.join(packageDir, "package.json"))) {
+  return getPackageEntryCandidates(pkg)
+    .some((entry) => fs.existsSync(path.join(packageDir, entry)));
+}
+
+function pruneInvalidCorePackages(runtimeDir) {
+  const runtimeNodeModules = getRuntimeNodeModules(runtimeDir);
+  for (const packageName of CORE_PACKAGES) {
+    const packageDir = getCorePackagePath(runtimeNodeModules, packageName);
+    try {
+      if (!fs.existsSync(packageDir)) continue;
+      const pkg = readJson(path.join(packageDir, "package.json"));
+      if (hasValidPackageEntry(packageDir, pkg)) continue;
+    } catch {
+      // Missing or invalid package metadata means npm must reinstall it.
+    }
+    log("Removing invalid Pi Core package", packageDir);
+    fs.rmSync(packageDir, { recursive: true, force: true });
+  }
 }
 
 function getInitialRuntimeInfo() {
@@ -925,6 +966,7 @@ async function installCoreRuntime(reason) {
   const runtimeDir = getRuntimeDir();
   const specs = getCoreSpecs();
   ensureRuntimePackageJson(runtimeDir, specs);
+  pruneInvalidCorePackages(runtimeDir);
   emitCoreSetupState({
     phase: "installing",
     message: reason,
@@ -978,6 +1020,7 @@ async function prepareCoreRuntime() {
   const runtimeDir = getRuntimeDir();
   const specs = getCoreSpecs();
   ensureRuntimePackageJson(runtimeDir, specs);
+  pruneInvalidCorePackages(runtimeDir);
   const versions = readInstalledCoreVersions(runtimeDir);
   const missing = missingCorePackages(versions);
   if (missing.length === 0) {
@@ -1025,9 +1068,9 @@ function startCoreSetup() {
     });
     runtimeInfo = await prepareCoreRuntimeWithRetry();
     log("Pi Core runtime ready", JSON.stringify(runtimeInfo.versions, null, 2));
-    linkCorePackagesIntoStandalone(runtimeInfo);
     if (serverUrl) {
-      await restartNextServer();
+      const syncResult = await ensureCorePackagesInStandalone(runtimeInfo);
+      if (syncResult.changed) await restartNextServer();
     }
     emitCoreSetupState({
       phase: "ready",
@@ -1134,34 +1177,182 @@ function getCorePackagePath(nodeModulesDir, packageName) {
   return path.join(nodeModulesDir, ...packageName.split("/"));
 }
 
-function linkCorePackagesIntoStandalone(info = runtimeInfo) {
-  if (!info?.runtimeDir) return;
-  const runtimeNodeModules = getRuntimeNodeModules(info.runtimeDir);
-  const standaloneNodeModules = path.join(getRuntimeStandaloneDir(info.runtimeDir), "node_modules");
-  if (!fs.existsSync(standaloneNodeModules)) return;
-
-  for (const packageName of CORE_PACKAGES) {
-    const source = getCorePackagePath(runtimeNodeModules, packageName);
-    const target = getCorePackagePath(standaloneNodeModules, packageName);
-    if (!fs.existsSync(path.join(source, "package.json"))) continue;
-
-    try {
-      if (fs.existsSync(target)) {
-        const realTarget = fs.realpathSync(target);
-        const realSource = fs.realpathSync(source);
-        if (realTarget === realSource) continue;
-        fs.rmSync(target, { recursive: true, force: true });
-      }
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.symlinkSync(source, target, process.platform === "win32" ? "junction" : "dir");
-      log("Linked Pi Core package into standalone runtime", `${packageName}\nsource=${source}\ntarget=${target}`);
-    } catch (error) {
-      throw new Error(`Could not link ${packageName} into the standalone runtime.\n\n${error.message}`);
+async function removePathWithoutFollowingJunctionAsync(target) {
+  try {
+    const stat = await fs.promises.lstat(target);
+    if (stat.isSymbolicLink()) {
+      await fs.promises.unlink(target);
+      return;
     }
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+  }
+
+  await fs.promises.rm(target, { recursive: true, force: true });
+}
+
+function removePathWithoutFollowingJunction(target) {
+  if (!fs.existsSync(target)) return;
+  const stat = fs.lstatSync(target);
+  if (stat.isSymbolicLink()) {
+    fs.unlinkSync(target);
+    return;
+  }
+  fs.rmSync(target, { recursive: true, force: true });
+}
+
+function needsCorePackageSync(source, target) {
+  let sourcePkg = null;
+  let targetPkg = null;
+  try {
+    sourcePkg = readJson(path.join(source, "package.json"));
+    targetPkg = readJson(path.join(target, "package.json"));
+  } catch {
+    return true;
+  }
+
+  if (!hasValidPackageEntry(source, sourcePkg)) return false;
+  if (sourcePkg.version !== targetPkg.version) return true;
+  return !hasValidPackageEntry(target, targetPkg);
+}
+
+function getPreservedStandaloneCoreDir(runtimeDir) {
+  return path.join(runtimeDir, ".standalone-core-preserve");
+}
+
+async function preserveStandaloneCorePackages(runtimeDir) {
+  const startedAt = Date.now();
+  const runtimeStandalone = getRuntimeStandaloneDir(runtimeDir);
+  const standaloneNodeModules = path.join(runtimeStandalone, "node_modules");
+  const preserveDir = getPreservedStandaloneCoreDir(runtimeDir);
+  const preserved = [];
+
+  await fs.promises.rm(preserveDir, { recursive: true, force: true });
+  for (const packageName of CORE_PACKAGES) {
+    const source = getCorePackagePath(standaloneNodeModules, packageName);
+    const target = getCorePackagePath(preserveDir, packageName);
+    try {
+      const stat = await fs.promises.lstat(source);
+      if (stat.isSymbolicLink()) {
+        log("Pi Core preserve skipped", `${packageName}\nreason=link`);
+        continue;
+      }
+      const pkg = readJson(path.join(source, "package.json"));
+      if (!hasValidPackageEntry(source, pkg)) {
+        log("Pi Core preserve skipped", `${packageName}\nreason=invalid package`);
+        continue;
+      }
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      await fs.promises.rename(source, target);
+      preserved.push({ packageName, version: pkg.version ?? "unknown" });
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        log("Pi Core preserve skipped", `${packageName}\nreason=${error.message || String(error)}`);
+      }
+    }
+  }
+
+  log(
+    "Pi Core preserve complete",
+    `count=${preserved.length}\npackages=${preserved.map((item) => `${item.packageName}@${item.version}`).join(", ") || "none"}\nelapsed=${Date.now() - startedAt}ms`,
+  );
+  return preserved;
+}
+
+async function restoreStandaloneCorePackages(runtimeDir) {
+  const startedAt = Date.now();
+  const runtimeStandalone = getRuntimeStandaloneDir(runtimeDir);
+  const standaloneNodeModules = path.join(runtimeStandalone, "node_modules");
+  const preserveDir = getPreservedStandaloneCoreDir(runtimeDir);
+  const restored = [];
+
+  try {
+    if (!fs.existsSync(preserveDir)) return { restored };
+    for (const packageName of CORE_PACKAGES) {
+      const source = getCorePackagePath(preserveDir, packageName);
+      const target = getCorePackagePath(standaloneNodeModules, packageName);
+      if (!fs.existsSync(source)) continue;
+      await removePathWithoutFollowingJunctionAsync(target);
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      await fs.promises.rename(source, target);
+      restored.push(packageName);
+    }
+    log(
+      "Pi Core restore complete",
+      `count=${restored.length}\npackages=${restored.join(", ") || "none"}\nelapsed=${Date.now() - startedAt}ms`,
+    );
+    return { restored };
+  } finally {
+    await fs.promises.rm(preserveDir, { recursive: true, force: true });
   }
 }
 
-function syncRuntimeStandalone(appRoot, runtimeDir) {
+async function ensureCorePackagesInStandalone(info = runtimeInfo, reason = desktopT("startup.syncingCore")) {
+  if (coreStandaloneSyncPromise) return coreStandaloneSyncPromise;
+
+  coreStandaloneSyncPromise = (async () => {
+    const startedAt = Date.now();
+    let changed = false;
+    if (!info?.runtimeDir) return { changed };
+
+    const runtimeNodeModules = getRuntimeNodeModules(info.runtimeDir);
+    const standaloneNodeModules = path.join(getRuntimeStandaloneDir(info.runtimeDir), "node_modules");
+    if (!fs.existsSync(standaloneNodeModules)) {
+      log("Pi Core standalone sync skipped", `standalone node_modules missing\nelapsed=${Date.now() - startedAt}ms`);
+      return { changed };
+    }
+
+    emitCoreSetupState({
+      phase: coreSetupState.phase === "ready" ? "ready" : "starting",
+      message: reason,
+      detail: "",
+      runtimeDir: info.runtimeDir,
+    });
+
+    for (const packageName of CORE_PACKAGES) {
+      const packageStartedAt = Date.now();
+      const source = getCorePackagePath(runtimeNodeModules, packageName);
+      const target = getCorePackagePath(standaloneNodeModules, packageName);
+      let sourcePkg = null;
+      try {
+        sourcePkg = readJson(path.join(source, "package.json"));
+      } catch {
+        log("Pi Core package sync skipped", `${packageName}\nsource package missing\nelapsed=${Date.now() - packageStartedAt}ms`);
+        continue;
+      }
+      if (!hasValidPackageEntry(source, sourcePkg)) {
+        log("Pi Core package sync skipped", `${packageName}\nsource package invalid\nelapsed=${Date.now() - packageStartedAt}ms`);
+        continue;
+      }
+      if (!needsCorePackageSync(source, target)) {
+        log("Pi Core package sync skipped", `${packageName}\nversion=${sourcePkg.version ?? "unknown"}\nelapsed=${Date.now() - packageStartedAt}ms`);
+        continue;
+      }
+
+      try {
+        await removePathWithoutFollowingJunctionAsync(target);
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
+        await fs.promises.cp(source, target, { recursive: true, dereference: true });
+        changed = true;
+        log(
+          "Copied Pi Core package into standalone runtime",
+          `${packageName}\nversion=${sourcePkg.version ?? "unknown"}\nsource=${source}\ntarget=${target}\nelapsed=${Date.now() - packageStartedAt}ms`,
+        );
+      } catch (error) {
+        throw new Error(`Could not copy ${packageName} into the standalone runtime.\n\n${error.message}`);
+      }
+    }
+
+    log("Pi Core standalone sync complete", `changed=${changed}\nelapsed=${Date.now() - startedAt}ms`);
+    return { changed };
+  })().finally(() => {
+    coreStandaloneSyncPromise = null;
+  });
+
+  return coreStandaloneSyncPromise;
+}
+
+async function syncRuntimeStandalone(appRoot, runtimeDir) {
   const packagedStandalone = path.join(appRoot, ".next", "standalone");
   const runtimeStandalone = getRuntimeStandaloneDir(runtimeDir);
   const packagedBuildId = getStandaloneBuildId(packagedStandalone);
@@ -1173,9 +1364,17 @@ function syncRuntimeStandalone(appRoot, runtimeDir) {
   }
 
   log("Syncing Next.js standalone server to runtime", `source=${packagedStandalone}\ntarget=${runtimeStandalone}`);
-  fs.rmSync(runtimeStandalone, { recursive: true, force: true });
-  fs.mkdirSync(path.dirname(runtimeStandalone), { recursive: true });
-  fs.cpSync(packagedStandalone, runtimeStandalone, { recursive: true });
+  emitCoreSetupState({
+    phase: coreSetupState.phase === "ready" ? "ready" : "starting",
+    message: desktopT("startup.preparingRuntime"),
+    detail: "",
+    runtimeDir,
+  });
+  await preserveStandaloneCorePackages(runtimeDir);
+  await fs.promises.rm(runtimeStandalone, { recursive: true, force: true });
+  await fs.promises.mkdir(path.dirname(runtimeStandalone), { recursive: true });
+  await fs.promises.cp(packagedStandalone, runtimeStandalone, { recursive: true });
+  await restoreStandaloneCorePackages(runtimeDir);
   return runtimeServer;
 }
 
@@ -1229,8 +1428,8 @@ async function doStartNextServer() {
   if (!runtimeInfo) runtimeInfo = getInitialRuntimeInfo();
   const standaloneServer = devMode
     ? packagedStandaloneServer
-    : syncRuntimeStandalone(appRoot, runtimeInfo.runtimeDir);
-  if (!devMode) linkCorePackagesIntoStandalone(runtimeInfo);
+    : await syncRuntimeStandalone(appRoot, runtimeInfo.runtimeDir);
+  if (!devMode) await ensureCorePackagesInStandalone(runtimeInfo);
   const command = getNodeCommand();
   const mode = devMode ? "dev" : "standalone";
   const args = devMode
@@ -1449,7 +1648,10 @@ async function handleCoreUpdate({ silent = false } = {}) {
     specs: getCoreSpecs(),
     versions: readInstalledCoreVersions(getRuntimeDir()),
   };
-  await restartNextServer();
+  const syncResult = await ensureCorePackagesInStandalone(runtimeInfo);
+  if (syncResult.changed) {
+    await restartNextServer();
+  }
   emitCoreSetupState({
     phase: "ready",
     message: desktopT("startup.coreReady"),
@@ -1505,7 +1707,10 @@ function registerDesktopIpc() {
       specs: getCoreSpecs(),
       versions: readInstalledCoreVersions(getRuntimeDir()),
     };
-    await restartNextServer();
+    const syncResult = await ensureCorePackagesInStandalone(runtimeInfo);
+    if (syncResult.changed) {
+      await restartNextServer();
+    }
     emitCoreSetupState({
       phase: "ready",
       message: desktopT("startup.coreReady"),
@@ -1563,7 +1768,7 @@ function createMainWindow() {
     icon: getAppIconPath(),
     show: false,
     ...(titleBarStyle ? { titleBarStyle } : {}),
-    autoHideMenuBar: false,
+    autoHideMenuBar: process.platform !== "darwin",
     backgroundColor: WINDOW_THEME_COLORS[initialTheme].background,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -1572,7 +1777,9 @@ function createMainWindow() {
       sandbox: true,
     },
   });
-  mainWindow.setMenuBarVisibility(true);
+  if (process.platform !== "darwin") {
+    mainWindow.setMenuBarVisibility(false);
+  }
 
   mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
     shell.openExternal(targetUrl);
