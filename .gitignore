@@ -24,6 +24,7 @@
 !/build/icon.svg
 !/build/icon.png
 /dist-desktop
+/.build-home
 
 # misc
 .DS_Store

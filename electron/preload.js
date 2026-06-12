@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld("piDesktop", {
   openLogFile: () => ipcRenderer.invoke("piDesktop:openLogFile"),
   selectDirectory: () => ipcRenderer.invoke("piDesktop:selectDirectory"),
   getPathForFile: (file) => webUtils.getPathForFile(file),
-  setTheme: (theme) => ipcRenderer.invoke("piDesktop:setTheme", theme),
+  setTheme: (mode, resolvedTheme) => ipcRenderer.invoke("piDesktop:setTheme", mode, resolvedTheme),
   getLanguageMode: () => ipcRenderer.invoke("piDesktop:getLanguageMode"),
   setLanguageMode: (mode, resolved) => ipcRenderer.invoke("piDesktop:setLanguageMode", mode, resolved),
   onOpenSettings: (callback) => {
