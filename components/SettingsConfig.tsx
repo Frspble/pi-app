@@ -3,26 +3,33 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useTheme, type ThemeMode } from "@/hooks/useTheme";
+import { useI18n, type LanguageMode } from "@/hooks/useI18n";
 
 type LoadState = "idle" | "loading" | "checking" | "updating" | "ready" | "unavailable" | "error";
-type SettingsSection = "appearance" | "core";
+type SettingsSection = "appearance" | "language" | "core";
 
-const THEME_OPTIONS: { mode: ThemeMode; label: string; description: string }[] = [
-  { mode: "system", label: "Follow System", description: "Use the current macOS or Windows appearance." },
-  { mode: "light", label: "Light", description: "Use the bright workspace palette." },
-  { mode: "dark", label: "Dark", description: "Use the low-light workspace palette." },
+const THEME_OPTIONS: { mode: ThemeMode; labelKey: "settings.theme.system" | "settings.theme.light" | "settings.theme.dark"; descriptionKey: "settings.theme.option.system.description" | "settings.theme.option.light.description" | "settings.theme.option.dark.description" }[] = [
+  { mode: "system", labelKey: "settings.theme.system", descriptionKey: "settings.theme.option.system.description" },
+  { mode: "light", labelKey: "settings.theme.light", descriptionKey: "settings.theme.option.light.description" },
+  { mode: "dark", labelKey: "settings.theme.dark", descriptionKey: "settings.theme.option.dark.description" },
 ];
 
-function statusLabel(status: PiCorePackageInfo["status"]) {
+const LANGUAGE_OPTIONS: { mode: LanguageMode; labelKey: "language.system" | "language.english" | "language.chinese"; descriptionKey: "language.option.system.description" | "language.option.en.description" | "language.option.zh.description" }[] = [
+  { mode: "system", labelKey: "language.system", descriptionKey: "language.option.system.description" },
+  { mode: "en", labelKey: "language.english", descriptionKey: "language.option.en.description" },
+  { mode: "zh", labelKey: "language.chinese", descriptionKey: "language.option.zh.description" },
+];
+
+function statusLabel(status: PiCorePackageInfo["status"], t: ReturnType<typeof useI18n>["t"]) {
   switch (status) {
     case "missing":
-      return "Not installed";
+      return t("core.status.missing");
     case "up-to-date":
-      return "Up to date";
+      return t("core.status.upToDate");
     case "update-available":
-      return "Update available";
+      return t("core.status.updateAvailable");
     default:
-      return "Unknown";
+      return t("core.status.unknown");
   }
 }
 
@@ -129,12 +136,26 @@ function CoreIcon() {
   );
 }
 
+function LanguageIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 5h10" />
+      <path d="M9 3v2" />
+      <path d="M12 5c-.6 3.5-3 6.5-7 8" />
+      <path d="M5 9c1.2 2 3.2 3.6 6 4.8" />
+      <path d="M16 19l3-7 3 7" />
+      <path d="M17 17h4" />
+    </svg>
+  );
+}
+
 export function SettingsConfig({ onClose }: { onClose: () => void }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
   const [state, setState] = useState<LoadState>("idle");
   const [coreStatus, setCoreStatus] = useState<PiCoreStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const { mode, resolvedTheme, setMode } = useTheme();
+  const { mode: languageMode, resolvedLanguage, setMode: setLanguageMode, t } = useI18n();
 
   const desktop = typeof window !== "undefined" ? window.piDesktop : undefined;
   const hasUpdate = useMemo(
@@ -146,7 +167,7 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
   const loadStatus = useCallback(async () => {
     if (!desktop) {
       setState("unavailable");
-      setMessage("Desktop runtime unavailable. Pi Core settings are available inside the packaged Pi App.");
+      setMessage(t("core.unavailable"));
       return;
     }
     setState("loading");
@@ -156,9 +177,9 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
       setState("ready");
     } catch (error) {
       setState("error");
-      setMessage(error instanceof Error ? error.message : "Failed to load Pi Core status.");
+      setMessage(error instanceof Error ? error.message : t("core.loadFailed"));
     }
-  }, [desktop]);
+  }, [desktop, t]);
 
   useEffect(() => {
     void loadStatus();
@@ -167,37 +188,51 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
   const checkUpdates = useCallback(async () => {
     if (!desktop) return;
     setState("checking");
-    setMessage("Checking npm for the latest compatible Pi Core versions...");
+    setMessage(t("core.checkingMessage"));
     try {
       const next = await desktop.checkCoreUpdates();
       setCoreStatus(next);
       setState("ready");
       setMessage(next.packages.some((pkg) => pkg.status === "update-available" || pkg.status === "missing")
-        ? "Compatible Pi Core updates are available."
-        : "Pi Core is already on the latest compatible versions.");
+        ? t("core.updatesAvailable")
+        : t("core.alreadyLatest"));
     } catch (error) {
       setState("error");
-      setMessage(error instanceof Error ? error.message : "Failed to check Pi Core updates.");
+      setMessage(error instanceof Error ? error.message : t("core.checkFailed"));
     }
-  }, [desktop]);
+  }, [desktop, t]);
 
   const updateCore = useCallback(async () => {
     if (!desktop) return;
     setState("updating");
-    setMessage("Updating Pi Core and restarting the local service...");
+    setMessage(t("core.updatingMessage"));
     try {
       const next = await desktop.updateCore();
       setCoreStatus(next);
       setState("ready");
-      setMessage("Pi Core updated. The local service has restarted.");
+      setMessage(t("core.updatedMessage"));
     } catch (error) {
       setState("error");
-      setMessage(error instanceof Error ? error.message : "Failed to update Pi Core.");
+      setMessage(error instanceof Error ? error.message : t("core.updateFailed"));
     }
-  }, [desktop]);
+  }, [desktop, t]);
 
-  const resolvedLabel = resolvedTheme === "dark" ? "Dark" : "Light";
-  const modeLabel = mode === "system" ? "system" : mode;
+  const resolvedLabel = resolvedTheme === "dark" ? t("settings.theme.resolvedDark") : t("settings.theme.resolvedLight");
+  const modeLabel = mode === "system" ? t("settings.theme.sourceSystem") : t(mode === "dark" ? "settings.theme.dark" : "settings.theme.light");
+  const languageLabel = resolvedLanguage === "zh" ? t("language.chinese") : t("language.english");
+  const languageSource = languageMode === "system"
+    ? t("language.system")
+    : t(languageMode === "zh" ? "language.chinese" : "language.english");
+  const headerTitle = activeSection === "appearance"
+    ? t("settings.appearance")
+    : activeSection === "language"
+      ? t("language.section")
+      : "Pi Core";
+  const headerHelp = activeSection === "appearance"
+    ? t("settings.appearanceHelp")
+    : activeSection === "language"
+      ? t("language.headerHelp")
+      : t("settings.piCoreHelp");
 
   return (
     <div
@@ -220,10 +255,13 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
         }}
       >
         <aside style={{ borderRight: "1px solid var(--border)", background: "var(--bg)", padding: 14 }}>
-          <div style={{ fontSize: 18, fontWeight: 650, marginBottom: 18 }}>Settings</div>
+          <div style={{ fontSize: 18, fontWeight: 650, marginBottom: 18 }}>{t("common.settings")}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <SectionButton active={activeSection === "appearance"} label="Appearance" onClick={() => setActiveSection("appearance")}>
+            <SectionButton active={activeSection === "appearance"} label={t("settings.appearance")} onClick={() => setActiveSection("appearance")}>
               <AppearanceIcon />
+            </SectionButton>
+            <SectionButton active={activeSection === "language"} label={t("language.section")} onClick={() => setActiveSection("language")}>
+              <LanguageIcon />
             </SectionButton>
             <SectionButton active={activeSection === "core"} label="Pi Core" onClick={() => setActiveSection("core")}>
               <CoreIcon />
@@ -234,16 +272,14 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
         <main style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <header style={{ height: 54, padding: "0 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--border)" }}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 650 }}>{activeSection === "appearance" ? "Appearance" : "Pi Core"}</div>
+              <div style={{ fontSize: 15, fontWeight: 650 }}>{headerTitle}</div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                {activeSection === "appearance"
-                  ? "Choose how Pi App follows light and dark mode."
-                  : "Manage the app-owned local runtime used by Pi App."}
+                {headerHelp}
               </div>
             </div>
             <button
               onClick={onClose}
-              title="Close settings"
+              title={t("common.close")}
               style={{ width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "none", color: "var(--text-muted)", cursor: "pointer", borderRadius: 6 }}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
@@ -258,9 +294,9 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <section style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "var(--bg)" }}>
                   <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 13, fontWeight: 650 }}>Theme</div>
+                    <div style={{ fontSize: 13, fontWeight: 650 }}>{t("settings.theme")}</div>
                     <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
-                      Using {resolvedLabel} from {modeLabel}.
+                      {t("settings.themeStatus", { theme: resolvedLabel, source: modeLabel })}
                     </div>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
@@ -286,7 +322,7 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
                           } as CSSProperties}
                         >
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                            <span style={{ fontSize: 13, fontWeight: 650 }}>{option.label}</span>
+                            <span style={{ fontSize: 13, fontWeight: 650 }}>{t(option.labelKey)}</span>
                             <span
                               style={{
                                 width: 14,
@@ -298,7 +334,7 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
                               }}
                             />
                           </div>
-                          <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--text-muted)" }}>{option.description}</div>
+                          <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--text-muted)" }}>{t(option.descriptionKey)}</div>
                         </button>
                       );
                     })}
@@ -306,17 +342,81 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
                 </section>
 
                 <section style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "var(--bg)" }}>
-                  <div style={{ fontSize: 13, fontWeight: 650, marginBottom: 12 }}>Preview</div>
+                  <div style={{ fontSize: 13, fontWeight: 650, marginBottom: 12 }}>{t("settings.preview")}</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-panel)", padding: 12 }}>
-                      <div style={{ fontSize: 12, fontWeight: 650, color: "var(--text)", marginBottom: 6 }}>Workspace surface</div>
+                      <div style={{ fontSize: 12, fontWeight: 650, color: "var(--text)", marginBottom: 6 }}>{t("settings.preview.workspace")}</div>
                       <div style={{ height: 8, width: "70%", borderRadius: 999, background: "var(--bg-hover)", marginBottom: 8 }} />
                       <div style={{ height: 8, width: "48%", borderRadius: 999, background: "var(--bg-selected)" }} />
                     </div>
                     <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-panel)", padding: 12 }}>
-                      <div style={{ fontSize: 12, fontWeight: 650, color: "var(--text)", marginBottom: 8 }}>Action state</div>
+                      <div style={{ fontSize: 12, fontWeight: 650, color: "var(--text)", marginBottom: 8 }}>{t("settings.preview.action")}</div>
                       <div style={{ display: "inline-flex", alignItems: "center", height: 26, padding: "0 10px", borderRadius: 6, background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 600 }}>
-                        Primary action
+                        {t("settings.preview.action")}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            ) : activeSection === "language" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <section style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "var(--bg)" }}>
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 13, fontWeight: 650 }}>{t("language.title")}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>
+                      {t("language.status", { language: languageLabel, source: languageSource })}
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                    {LANGUAGE_OPTIONS.map((option) => {
+                      const selected = option.mode === languageMode;
+                      return (
+                        <button
+                          key={option.mode}
+                          onClick={() => setLanguageMode(option.mode)}
+                          style={{
+                            minHeight: 82,
+                            padding: 12,
+                            border: selected ? "1px solid var(--accent)" : "1px solid var(--border)",
+                            borderRadius: 8,
+                            background: selected ? "var(--bg-selected)" : "var(--bg-panel)",
+                            color: "var(--text)",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            boxShadow: selected ? "0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent)" : "none",
+                          } as CSSProperties}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 650 }}>{t(option.labelKey)}</span>
+                            <span
+                              style={{
+                                width: 14,
+                                height: 14,
+                                borderRadius: 999,
+                                border: selected ? "4px solid var(--accent)" : "1px solid var(--border)",
+                                background: "var(--bg)",
+                                flexShrink: 0,
+                              }}
+                            />
+                          </div>
+                          <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--text-muted)" }}>{t(option.descriptionKey)}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "var(--bg)" }}>
+                  <div style={{ fontSize: 13, fontWeight: 650, marginBottom: 12 }}>{t("language.preview")}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-panel)", padding: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 650, color: "var(--text)", marginBottom: 6 }}>{t("language.preview.surface")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{t("language.headerHelp")}</div>
+                    </div>
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg-panel)", padding: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 650, color: "var(--text)", marginBottom: 8 }}>{t("language.preview.action")}</div>
+                      <div style={{ display: "inline-flex", alignItems: "center", height: 26, padding: "0 10px", borderRadius: 6, background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 600 }}>
+                        {t("language.preview.action")}
                       </div>
                     </div>
                   </div>
@@ -331,39 +431,39 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
                 <section style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "var(--bg)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 650 }}>Runtime</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Pi Core is installed outside the packaged app.</div>
+                      <div style={{ fontSize: 13, fontWeight: 650 }}>{t("core.runtime")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>{t("core.runtimeHelp")}</div>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <button disabled={busy || !desktop} onClick={() => void desktop?.openRuntimeFolder()} style={actionButtonStyle(busy || !desktop)}>Open Runtime</button>
-                      <button disabled={busy || !desktop} onClick={() => void desktop?.openLogFile()} style={actionButtonStyle(busy || !desktop)}>Open Log</button>
+                      <button disabled={busy || !desktop} onClick={() => void desktop?.openRuntimeFolder()} style={actionButtonStyle(busy || !desktop)}>{t("core.openRuntime")}</button>
+                      <button disabled={busy || !desktop} onClick={() => void desktop?.openLogFile()} style={actionButtonStyle(busy || !desktop)}>{t("core.openLog")}</button>
                     </div>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <InfoRow label="Runtime path" value={coreStatus?.runtimeDir ?? "Loading..."} />
-                    <InfoRow label="Node modules" value={coreStatus?.nodeModules ?? "Loading..."} />
-                    <InfoRow label="Log file" value={coreStatus?.logPath ?? "Loading..."} />
+                    <InfoRow label={t("core.runtimePath")} value={coreStatus?.runtimeDir ?? t("common.loading")} />
+                    <InfoRow label={t("core.nodeModules")} value={coreStatus?.nodeModules ?? t("common.loading")} />
+                    <InfoRow label={t("core.logFile")} value={coreStatus?.logPath ?? t("common.loading")} />
                   </div>
                 </section>
 
                 <section style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", background: "var(--bg)" }}>
                   <div style={{ padding: 14, borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 650 }}>Packages</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Updates stay within the compatible range declared by this app.</div>
+                      <div style={{ fontSize: 13, fontWeight: 650 }}>{t("core.packages")}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>{t("core.packagesHelp")}</div>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button disabled={busy || !desktop} onClick={checkUpdates} style={actionButtonStyle(busy || !desktop)}>
-                        {state === "checking" ? "Checking..." : "Check Updates"}
+                        {state === "checking" ? t("core.checking") : t("core.checkUpdates")}
                       </button>
                       <button disabled={busy || !desktop || !hasUpdate} onClick={updateCore} style={actionButtonStyle(busy || !desktop || !hasUpdate, true)}>
-                        {state === "updating" ? "Updating..." : "Update Pi Core"}
+                        {state === "updating" ? t("core.updating") : t("core.updateCore")}
                       </button>
                     </div>
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(210px, 1.4fr) 100px 110px 130px 120px", gap: 0, fontSize: 11, color: "var(--text-dim)", borderBottom: "1px solid var(--border)" }}>
-                    {["Package", "Range", "Installed", "Latest", "Status"].map((label) => (
+                    {[t("core.table.package"), t("core.table.range"), t("core.table.installed"), t("core.table.latest"), t("core.table.status")].map((label) => (
                       <div key={label} style={{ padding: "8px 12px", fontWeight: 600 }}>{label}</div>
                     ))}
                   </div>
@@ -373,12 +473,12 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
                       <div style={{ padding: "10px 12px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{pkg.range}</div>
                       <div style={{ padding: "10px 12px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{pkg.installed ?? "-"}</div>
                       <div style={{ padding: "10px 12px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{pkg.latest ?? "-"}</div>
-                      <div style={{ padding: "10px 12px", color: statusColor(pkg.status), fontWeight: 600 }}>{statusLabel(pkg.status)}</div>
+                      <div style={{ padding: "10px 12px", color: statusColor(pkg.status), fontWeight: 600 }}>{statusLabel(pkg.status, t)}</div>
                     </div>
                   ))}
                   {!coreStatus && (
                     <div style={{ padding: 18, color: "var(--text-muted)", fontSize: 12 }}>
-                      Loading Pi Core status...
+                      {t("core.loadingStatus")}
                     </div>
                   )}
                 </section>

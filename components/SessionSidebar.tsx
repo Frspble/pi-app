@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { SessionInfo } from "@/lib/types";
 import { FileExplorer } from "./FileExplorer";
+import { useI18n } from "@/hooks/useI18n";
 
 interface Props {
   selectedSessionId: string | null;
@@ -19,17 +20,17 @@ interface Props {
   onAtMention?: (relativePath: string) => void;
 }
 
-function formatRelativeTime(dateStr: string): string {
+function formatRelativeTime(dateStr: string, t: ReturnType<typeof useI18n>["t"]): string {
   const date = new Date(dateStr);
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const mins = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
+  if (mins < 1) return t("time.justNow");
+  if (mins < 60) return t("time.minutesAgo", { count: mins });
+  if (hours < 24) return t("time.hoursAgo", { count: hours });
+  if (days < 7) return t("time.daysAgo", { count: days });
   return date.toLocaleDateString();
 }
 
@@ -197,6 +198,7 @@ function PiAgentTitle() {
 }
 
 export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention }: Props) {
+  const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -301,7 +303,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       const data = await res.json().catch(() => ({})) as { cwd?: string; error?: string };
       if (!res.ok || data.error) {
         const message = data.error ?? `HTTP ${res.status}`;
-        setCustomPathError(options.folderOnly && /not a directory/i.test(message) ? "Please drop a folder." : message);
+        setCustomPathError(options.folderOnly && /not a directory/i.test(message) ? t("sidebar.pleaseDropFolder") : message);
         return;
       }
       setSelectedCwd(data.cwd ?? nextPath);
@@ -313,7 +315,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     } finally {
       setCustomPathValidating(false);
     }
-  }, [customPathValidating]);
+  }, [customPathValidating, t]);
 
   const commitCustomPath = useCallback(async () => {
     await commitProjectPath(customPathValue);
@@ -322,7 +324,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const handleChooseDirectory = useCallback(async () => {
     if (!window.piDesktop?.selectDirectory) {
       setCustomPathOpen(true);
-      setCustomPathError("Folder picker is available in the desktop app. Type the path instead.");
+      setCustomPathError(t("sidebar.folderPickerDesktop"));
       setTimeout(() => customPathInputRef.current?.focus(), 0);
       return;
     }
@@ -335,7 +337,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     } catch (error) {
       setCustomPathError(error instanceof Error ? error.message : String(error));
     }
-  }, [commitProjectPath]);
+  }, [commitProjectPath, t]);
 
   const handleCwdDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     if (!Array.from(e.dataTransfer.types).includes("Files")) return;
@@ -355,12 +357,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const droppedPath = window.piDesktop?.getPathForFile?.(file);
     if (!droppedPath) {
       setCustomPathOpen(true);
-      setCustomPathError("Folder drag-and-drop is available in the desktop app. Type the path instead.");
+      setCustomPathError(t("sidebar.dragDesktop"));
       setTimeout(() => customPathInputRef.current?.focus(), 0);
       return;
     }
     void commitProjectPath(droppedPath, { folderOnly: true });
-  }, [commitProjectPath]);
+  }, [commitProjectPath, t]);
 
   const handleCwdDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     const nextTarget = e.relatedTarget;
@@ -448,7 +450,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 flexShrink: 0,
                 transition: "background 0.12s, color 0.12s, border-color 0.12s",
               }}
-              title={selectedCwd ? `New session in ${selectedCwd}` : "Select a project first"}
+              title={selectedCwd ? t("sidebar.newIn", { cwd: selectedCwd }) : t("sidebar.selectProjectFirst")}
               onMouseEnter={(e) => {
                 if (!selectedCwd) return;
                 e.currentTarget.style.background = "var(--bg-selected)";
@@ -465,7 +467,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 <line x1="6" y1="1" x2="6" y2="11" />
                 <line x1="1" y1="6" x2="11" y2="6" />
               </svg>
-              New
+              {t("sidebar.new")}
             </button>
             <button
               onClick={() => loadSessions(false)}
@@ -493,7 +495,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 e.currentTarget.style.color = "var(--text-muted)";
                 e.currentTarget.style.borderColor = "var(--border)";
               }}
-              title="Refresh"
+              title={t("common.refresh")}
             >
               {sessionRefreshDone ? (
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -547,7 +549,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               }}
               title={selectedCwd ?? ""}
             >
-              {cwdDragOver ? "Drop folder to select project…" : selectedCwd ? shortenCwd(selectedCwd, homeDir) : (initialSessionId && !restoredRef.current ? "" : "Select project…")}
+              {cwdDragOver ? t("sidebar.dropFolder") : selectedCwd ? shortenCwd(selectedCwd, homeDir) : (initialSessionId && !restoredRef.current ? "" : t("sidebar.selectProject"))}
             </span>
           </button>
 
@@ -628,7 +630,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                     <path d="M1 3A1 1 0 0 1 2 2H4L5 3.5H8.5a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 1 8V3Z" />
                   </svg>
-                  <span>Use default directory</span>
+                  <span>{t("sidebar.useDefaultDirectory")}</span>
                 </button>
               )}
 
@@ -657,7 +659,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     <path d="M1 3A1 1 0 0 1 2 2H4L5 3.5H8.5a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 1 8V3Z" />
                     <path d="M6.5 5H8" />
                   </svg>
-                  <span>{customPathValidating ? "Checking…" : "Choose folder…"}</span>
+                  <span>{customPathValidating ? t("sidebar.checking") : t("sidebar.chooseFolder")}</span>
                 </button>
               ) : !customPathOpen ? (
                 <button
@@ -685,7 +687,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     <line x1="5" y1="1" x2="5" y2="9" />
                     <line x1="1" y1="5" x2="9" y2="5" />
                   </svg>
-                  <span>Custom path…</span>
+                  <span>{t("sidebar.customPath")}</span>
                 </button>
               ) : (
                 <div style={{ padding: "6px 8px", borderTop: recentCwds.length > 0 ? "none" : undefined }}>
@@ -749,7 +751,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         opacity: customPathValidating || !customPathValue.trim() ? 0.65 : 1,
                       }}
                     >
-                      {customPathValidating ? "Checking…" : "Open"}
+                      {customPathValidating ? t("sidebar.checking") : t("common.open")}
                     </button>
                     <button
                       onClick={() => { setCustomPathOpen(false); setCustomPathValue(""); setCustomPathError(null); }}
@@ -764,7 +766,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         cursor: "pointer",
                       }}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                   </div>
                 </div>
@@ -789,7 +791,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       <div style={{ flex: explorerOpen && (selectedCwdProp || selectedCwd) ? "1 1 0" : "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}>
         {loading && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            Loading...
+            {t("sidebar.loadingSessions")}
           </div>
         )}
         {error && (
@@ -799,7 +801,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         )}
         {!loading && !error && filteredSessions.length === 0 && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            No sessions found
+            {t("sidebar.noSessions")}
           </div>
         )}
         {sessionTree.map((node) => (
@@ -857,7 +859,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               >
                 <polyline points="3 2 7 5 3 8" />
               </svg>
-              Explorer
+              {t("sidebar.explorer")}
             </button>
             <button
               onClick={() => {
@@ -866,7 +868,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 if (explorerRefreshTimerRef.current) clearTimeout(explorerRefreshTimerRef.current);
                 explorerRefreshTimerRef.current = setTimeout(() => setExplorerRefreshDone(false), 2000);
               }}
-              title="Refresh explorer"
+              title={t("sidebar.refreshExplorer")}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 26, height: 26, padding: 0, marginRight: 6,
@@ -993,6 +995,7 @@ function SessionItem({
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 }) {
+  const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -1078,7 +1081,7 @@ function SessionItem({
         /* ── Delete confirmation: same height, two flat buttons ── */
         <>
           <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            Delete <span style={{ fontWeight: 600 }}>&ldquo;{title.slice(0, 22)}{title.length > 22 ? "…" : ""}&rdquo;</span>?
+            {t("sidebar.deleteSession", { title: `${title.slice(0, 22)}${title.length > 22 ? "…" : ""}` })}
           </div>
           <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
             <button
@@ -1098,7 +1101,7 @@ function SessionItem({
                 <path d="M10 11v6M14 11v6" />
                 <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
               </svg>
-              Delete
+              {t("common.delete")}
             </button>
             <button
               onClick={handleDeleteCancel}
@@ -1111,7 +1114,7 @@ function SessionItem({
                 whiteSpace: "nowrap",
               }}
             >
-              Cancel
+              {t("common.cancel")}
             </button>
           </div>
         </>
@@ -1167,8 +1170,8 @@ function SessionItem({
               {title}
             </div>
             <div style={{ marginTop: 2, display: "flex", gap: 8, color: "var(--text-dim)", fontSize: 11 }}>
-              <span title={session.modified}>{formatRelativeTime(session.modified)}</span>
-              <span>{session.messageCount} msgs</span>
+              <span title={session.modified}>{formatRelativeTime(session.modified, t)}</span>
+              <span>{t("sidebar.messages", { count: session.messageCount })}</span>
             </div>
           </div>
 
@@ -1176,7 +1179,7 @@ function SessionItem({
           {hasChildren && (
             <button
               onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(); }}
-              title={collapsed ? "Expand forks" : "Collapse forks"}
+              title={collapsed ? t("sidebar.expandForks") : t("sidebar.collapseForks")}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
                 width: 20, height: 20, padding: 0, flexShrink: 0,
@@ -1197,7 +1200,7 @@ function SessionItem({
             <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
               <button
                 onClick={startRename}
-                title="Rename"
+                title={t("sidebar.rename")}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   width: 32, height: 32, padding: 0,
@@ -1223,7 +1226,7 @@ function SessionItem({
               </button>
               <button
                 onClick={handleDeleteClick}
-                title="Delete"
+                title={t("common.delete")}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   width: 32, height: 32, padding: 0,

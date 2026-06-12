@@ -20,6 +20,8 @@ declare global {
   }
 
   type PiCoreSetupPhase = "starting" | "installing" | "ready" | "error";
+  type LanguageMode = "system" | "en" | "zh";
+  type ResolvedLanguage = "en" | "zh";
 
   interface PiCoreSetupState {
     phase: PiCoreSetupPhase;
@@ -43,6 +45,8 @@ declare global {
       selectDirectory: () => Promise<string | null>;
       getPathForFile: (file: File) => string;
       setTheme: (theme: "light" | "dark") => Promise<null>;
+      getLanguageMode: () => Promise<LanguageMode | null>;
+      setLanguageMode: (mode: LanguageMode, resolved: ResolvedLanguage) => Promise<null>;
       onOpenSettings: (callback: () => void) => () => void;
       onCoreSetupState: (callback: (state: PiCoreSetupState) => void) => () => void;
     };
