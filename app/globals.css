@@ -138,18 +138,6 @@ pre, code {
   pointer-events: none;
 }
 
-.desktop-platform-win32 .app-titlebar {
-  padding-right: 138px;
-}
-
-.desktop-platform-win32 .file-panel-toggle {
-  right: 138px !important;
-}
-
-.desktop-platform-win32 .right-panel-titlebar {
-  padding-right: 138px;
-}
-
 /* react-markdown output styles */
 .markdown-body {
   font-size: 14px;
