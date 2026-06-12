@@ -14,6 +14,142 @@ import { useTheme } from "@/hooks/useTheme";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
+function PiCoreStartupOverlay({ state }: { state: PiCoreSetupState | null }) {
+  const phase = state?.phase ?? "starting";
+  const isError = phase === "error";
+  const detailLines = (state?.detail ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-8);
+
+  const retry = () => {
+    void window.piDesktop?.retryCoreSetup();
+  };
+  const openLog = () => {
+    void window.piDesktop?.openLogFile();
+  };
+  const quit = () => {
+    void window.piDesktop?.quit();
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 900,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(5, 9, 18, 0.38)",
+        backdropFilter: "blur(8px)",
+        color: "var(--text)",
+      }}
+    >
+      <div
+        style={{
+          width: "min(560px, calc(100vw - 36px))",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          background: "var(--bg-panel)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.34)",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "22px 24px 18px", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                background: isError ? "rgba(239,68,68,0.14)" : "rgba(37,99,235,0.14)",
+                color: isError ? "#ef4444" : "var(--accent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              {isError ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2v4" />
+                  <path d="M12 18v4" />
+                  <path d="m4.93 4.93 2.83 2.83" />
+                  <path d="m16.24 16.24 2.83 2.83" />
+                  <path d="M2 12h4" />
+                  <path d="M18 12h4" />
+                  <path d="m4.93 19.07 2.83-2.83" />
+                  <path d="m16.24 7.76 2.83-2.83" />
+                </svg>
+              )}
+            </div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{isError ? "Pi Core setup failed" : "Preparing Pi Core"}</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
+                {state?.message ?? "Starting Pi App..."}
+              </div>
+            </div>
+          </div>
+
+          {!isError && (
+            <div style={{ height: 4, borderRadius: 999, overflow: "hidden", background: "var(--border)", marginTop: 16 }}>
+              <div style={{ width: "42%", height: "100%", borderRadius: 999, background: "var(--accent)", animation: "core-startup-progress 1.25s ease-in-out infinite" }} />
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: 16 }}>
+          {state?.runtimeDir && (
+            <div style={{ marginBottom: 12, color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={state.runtimeDir}>
+              {state.runtimeDir}
+            </div>
+          )}
+          {detailLines.length > 0 && (
+            <pre
+              style={{
+                maxHeight: 136,
+                overflow: "auto",
+                margin: 0,
+                padding: 12,
+                borderRadius: 8,
+                border: "1px solid var(--border)",
+                background: "var(--bg)",
+                color: isError ? "#ef4444" : "var(--text-muted)",
+                fontSize: 11,
+                lineHeight: 1.55,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {detailLines.join("\n")}
+            </pre>
+          )}
+          {isError && (
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+              <button onClick={openLog} style={{ height: 30, padding: "0 11px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>Open Log</button>
+              <button onClick={quit} style={{ height: 30, padding: "0 11px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>Quit</button>
+              <button onClick={retry} style={{ height: 30, padding: "0 12px", borderRadius: 6, border: "1px solid var(--accent)", background: "var(--accent)", color: "white", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Retry</button>
+            </div>
+          )}
+        </div>
+      </div>
+      <style>{`
+        @keyframes core-startup-progress {
+          0% { transform: translateX(-115%); }
+          55% { transform: translateX(85%); }
+          100% { transform: translateX(260%); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -29,8 +165,12 @@ export function AppShell() {
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [settingsConfigOpen, setSettingsConfigOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [coreSetupState, setCoreSetupState] = useState<PiCoreSetupState | null>(null);
+  const [desktopRuntimeChecked, setDesktopRuntimeChecked] = useState(false);
+  const [hasDesktopSetupApi, setHasDesktopSetupApi] = useState(false);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
+  const coreReady = desktopRuntimeChecked && (!hasDesktopSetupApi || coreSetupState?.phase === "ready");
 
   // Branch navigator state — populated by ChatWindow via onBranchDataChange
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
@@ -73,6 +213,42 @@ export function AppShell() {
   useEffect(() => {
     const unsubscribe = window.piDesktop?.onOpenSettings?.(() => setSettingsConfigOpen(true));
     return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
+    const desktop = window.piDesktop;
+    if (!desktop?.getCoreSetupState) {
+      setHasDesktopSetupApi(false);
+      setDesktopRuntimeChecked(true);
+      return;
+    }
+    setHasDesktopSetupApi(true);
+
+    let cancelled = false;
+    desktop.getCoreSetupState()
+      .then((state) => {
+        if (!cancelled) {
+          setCoreSetupState(state);
+          setDesktopRuntimeChecked(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCoreSetupState({
+            phase: "ready",
+            message: "Desktop runtime unavailable",
+            detail: "",
+            runtimeDir: null,
+            packages: [],
+          });
+          setDesktopRuntimeChecked(true);
+        }
+      });
+    const unsubscribe = desktop.onCoreSetupState?.((state) => setCoreSetupState(state));
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, []);
 
   const toggleTopPanel = useCallback((panel: "branches" | "system") => {
@@ -240,26 +416,37 @@ export function AppShell() {
 
   const sidebarContent = (
     <>
-      <SessionSidebar
-        selectedSessionId={selectedSession?.id ?? null}
-        onSelectSession={handleSelectSession}
-        onNewSession={handleNewSession}
-        initialSessionId={initialSessionId}
-        onInitialRestoreDone={handleInitialRestoreDone}
-        refreshKey={refreshKey}
-        onSessionDeleted={handleSessionDeleted}
-        selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
-        onCwdChange={handleCwdChange}
-        onOpenFile={handleOpenFile}
-        explorerRefreshKey={explorerRefreshKey}
-        onAtMention={handleAtMention}
-      />
+      {coreReady ? (
+        <SessionSidebar
+          selectedSessionId={selectedSession?.id ?? null}
+          onSelectSession={handleSelectSession}
+          onNewSession={handleNewSession}
+          initialSessionId={initialSessionId}
+          onInitialRestoreDone={handleInitialRestoreDone}
+          refreshKey={refreshKey}
+          onSessionDeleted={handleSessionDeleted}
+          selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
+          onCwdChange={handleCwdChange}
+          onOpenFile={handleOpenFile}
+          explorerRefreshKey={explorerRefreshKey}
+          onAtMention={handleAtMention}
+        />
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, padding: 14, color: "var(--text-muted)" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 18 }}>Pi App</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ height: 32, borderRadius: 7, background: "var(--bg-hover)", opacity: 0.7 }} />
+            <div style={{ height: 32, borderRadius: 7, background: "var(--bg-hover)", opacity: 0.5 }} />
+            <div style={{ height: 32, borderRadius: 7, background: "var(--bg-hover)", opacity: 0.35 }} />
+          </div>
+        </div>
+      )}
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
           {
             label: "Models",
             onClick: () => setModelsConfigOpen(true),
-            disabled: false,
+            disabled: !coreReady,
             icon: (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" />
@@ -273,7 +460,7 @@ export function AppShell() {
           {
             label: "Skills",
             onClick: () => setSkillsConfigOpen(true),
-            disabled: !activeCwd && !selectedSession?.cwd && !newSessionCwd,
+            disabled: !coreReady || (!activeCwd && !selectedSession?.cwd && !newSessionCwd),
             icon: (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -285,7 +472,7 @@ export function AppShell() {
           {
             label: "Settings",
             onClick: () => setSettingsConfigOpen(true),
-            disabled: false,
+            disabled: !coreReady,
             icon: (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="3" />
@@ -407,7 +594,7 @@ export function AppShell() {
               </svg>
             )}
           </button>
-          {showChat && (
+          {coreReady && showChat && (
             <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
               <button
                 onClick={handleExportSession}
@@ -499,7 +686,7 @@ export function AppShell() {
             </div>
           )}
           {/* Session stats — right-aligned in top bar */}
-          {showChat && (sessionStats || contextUsage) && (() => {
+          {coreReady && showChat && (sessionStats || contextUsage) && (() => {
             const t = sessionStats?.tokens;
             const c = sessionStats?.cost ?? 0;
             const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
@@ -627,7 +814,11 @@ export function AppShell() {
 
         {/* Chat content */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {showChat ? (
+          {!coreReady ? (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
+              Pi App is opening...
+            </div>
+          ) : showChat ? (
             <ChatWindow
               key={sessionKey}
               session={selectedSession}
@@ -690,11 +881,11 @@ export function AppShell() {
 
         {/* File content */}
         <div style={{ flex: 1, overflow: "hidden" }}>
-          {activeFileTab?.filePath ? (
+          {coreReady && activeFileTab?.filePath ? (
             <FileViewer filePath={activeFileTab.filePath} cwd={activeCwd ?? undefined} />
           ) : (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-              No file open
+              {coreReady ? "No file open" : "Pi Core is starting"}
             </div>
           )}
         </div>
@@ -719,11 +910,12 @@ export function AppShell() {
         <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
       </svg>
     </button>
-    {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
-    {skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
+    {coreReady && modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
+    {coreReady && skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
       <SkillsConfig cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!} onClose={() => setSkillsConfigOpen(false)} />
     )}
-    {settingsConfigOpen && <SettingsConfig onClose={() => setSettingsConfigOpen(false)} />}
+    {coreReady && settingsConfigOpen && <SettingsConfig onClose={() => setSettingsConfigOpen(false)} />}
+    {!coreReady && <PiCoreStartupOverlay state={coreSetupState} />}
     </>
   );
 }

@@ -4,6 +4,10 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("piDesktop", {
+  getCoreSetupState: () => ipcRenderer.invoke("piDesktop:getCoreSetupState"),
+  retryStartup: () => ipcRenderer.invoke("piDesktop:retryStartup"),
+  retryCoreSetup: () => ipcRenderer.invoke("piDesktop:retryCoreSetup"),
+  quit: () => ipcRenderer.invoke("piDesktop:quit"),
   getCoreStatus: () => ipcRenderer.invoke("piDesktop:getCoreStatus"),
   checkCoreUpdates: () => ipcRenderer.invoke("piDesktop:checkCoreUpdates"),
   updateCore: () => ipcRenderer.invoke("piDesktop:updateCore"),
@@ -15,5 +19,10 @@ contextBridge.exposeInMainWorld("piDesktop", {
     const listener = () => callback();
     ipcRenderer.on("piDesktop:openSettings", listener);
     return () => ipcRenderer.removeListener("piDesktop:openSettings", listener);
+  },
+  onCoreSetupState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("piDesktop:coreSetupState", listener);
+    return () => ipcRenderer.removeListener("piDesktop:coreSetupState", listener);
   },
 });
