@@ -1,8 +1,12 @@
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const proxied = await proxyToCoreService(req);
+  if (proxied) return proxied;
+
+  const { AuthStorage } = await import("@earendil-works/pi-coding-agent");
   const authStorage = AuthStorage.create();
   const providers = authStorage.getOAuthProviders();
 

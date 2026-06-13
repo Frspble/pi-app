@@ -1,9 +1,15 @@
-import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const proxied = await proxyToCoreService(req);
+  if (proxied) return proxied;
+
+  const [{ AuthStorage, ModelRegistry, SettingsManager, getAgentDir }, { getSupportedThinkingLevels }] = await Promise.all([
+    import("@earendil-works/pi-coding-agent"),
+    import("@earendil-works/pi-ai"),
+  ]);
   const nameMap = new Map<string, string>();
   let modelList: { id: string; name: string; provider: string }[] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;

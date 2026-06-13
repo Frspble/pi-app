@@ -6,7 +6,7 @@ import { basename, dirname, join } from "path";
 import { promisify } from "util";
 import { fileURLToPath } from "url";
 import { NextResponse } from "next/server";
-import { resolveSessionPath } from "@/lib/session-reader";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 const execFileAsync = promisify(execFile);
 
@@ -43,12 +43,16 @@ async function getPiCliPath(): Promise<string> {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
 
   try {
+    const proxied = await proxyToCoreService(req);
+    if (proxied) return proxied;
+
+    const { resolveSessionPath } = await import("@/lib/session-reader");
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });

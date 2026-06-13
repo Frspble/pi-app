@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { completeSimple, type AssistantMessage } from "@earendil-works/pi-ai";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { proxyToCoreService } from "@/lib/core-proxy";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +28,13 @@ export async function POST(req: Request) {
   let tempDir: string | undefined;
 
   try {
+    const proxied = await proxyToCoreService(req);
+    if (proxied) return proxied;
+
+    const [{ completeSimple }, { AuthStorage, ModelRegistry }] = await Promise.all([
+      import("@earendil-works/pi-ai"),
+      import("@earendil-works/pi-coding-agent"),
+    ]);
     const body = await req.json() as { providerName?: unknown; provider?: unknown; model?: unknown };
     const providerName = typeof body.providerName === "string" ? body.providerName.trim() : "";
     if (!providerName) return NextResponse.json({ ok: false, error: "providerName is required" }, { status: 400 });

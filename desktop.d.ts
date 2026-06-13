@@ -19,7 +19,7 @@ declare global {
     packages: PiCorePackageInfo[];
   }
 
-  type PiCoreSetupPhase = "starting" | "installing" | "ready" | "error";
+  type PiCoreSetupPhase = "starting" | "installing" | "service-starting" | "ready" | "updating" | "rolling-back" | "error";
   type LanguageMode = "system" | "en" | "zh";
   type ResolvedLanguage = "en" | "zh";
   type DesktopPlatform = "darwin" | "win32" | "linux";

@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
-import { listAllSessions } from "@/lib/session-reader";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const proxied = await proxyToCoreService(req);
+    if (proxied) return proxied;
+
+    const { listAllSessions } = await import("@/lib/session-reader");
     const sessions = await listAllSessions();
     return NextResponse.json({ sessions });
   } catch (error) {

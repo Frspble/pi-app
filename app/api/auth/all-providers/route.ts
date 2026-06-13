@@ -1,11 +1,15 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 export const dynamic = "force-dynamic";
 
 // Providers that use OAuth — handled separately via /api/auth/providers
 const OAUTH_PROVIDER_IDS = new Set(["anthropic", "github-copilot", "openai-codex"]);
 
-export async function GET() {
+export async function GET(req: Request) {
+  const proxied = await proxyToCoreService(req);
+  if (proxied) return proxied;
+
+  const { AuthStorage, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
   const all = registry.getAll();

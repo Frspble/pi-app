@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
 import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import {
-  resolveSessionPath,
-  invalidateSessionPathCache,
-  buildSessionContext,
-  listAllSessions,
-} from "@/lib/session-reader";
-import { getRpcSession } from "@/lib/rpc-manager";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 export async function GET(
   req: Request,
@@ -16,6 +9,14 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
+    const proxied = await proxyToCoreService(req);
+    if (proxied) return proxied;
+
+    const [{ SessionManager }, { resolveSessionPath, buildSessionContext, listAllSessions }, { getRpcSession }] = await Promise.all([
+      import("@earendil-works/pi-coding-agent"),
+      import("@/lib/session-reader"),
+      import("@/lib/rpc-manager"),
+    ]);
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
@@ -83,6 +84,13 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
+    const proxied = await proxyToCoreService(req);
+    if (proxied) return proxied;
+
+    const [{ SessionManager }, { resolveSessionPath }] = await Promise.all([
+      import("@earendil-works/pi-coding-agent"),
+      import("@/lib/session-reader"),
+    ]);
     const { name } = await req.json() as { name?: string };
     if (typeof name !== "string") {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
@@ -101,11 +109,18 @@ export async function PATCH(
 
 // DELETE /api/sessions/[id]
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   try {
+    const proxied = await proxyToCoreService(req);
+    if (proxied) return proxied;
+
+    const [{ resolveSessionPath, invalidateSessionPathCache }, { getRpcSession }] = await Promise.all([
+      import("@/lib/session-reader"),
+      import("@/lib/rpc-manager"),
+    ]);
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });

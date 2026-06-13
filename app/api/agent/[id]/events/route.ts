@@ -1,6 +1,4 @@
-import { resolveSessionPath } from "@/lib/session-reader";
-import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +8,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const proxied = await proxyToCoreService(req);
+  if (proxied) return proxied;
+
+  const [{ resolveSessionPath }, { getRpcSession, startRpcSession }, { SessionManager }] = await Promise.all([
+    import("@/lib/session-reader"),
+    import("@/lib/rpc-manager"),
+    import("@earendil-works/pi-coding-agent"),
+  ]);
 
   // Fast path: already-running session
   let session = getRpcSession(id);

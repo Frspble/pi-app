@@ -3,6 +3,7 @@
 
 const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme } = require("electron");
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const net = require("net");
@@ -19,6 +20,9 @@ const CORE_PACKAGES = [
 const CORE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const NPM_TIMEOUT_MS = 10 * 60 * 1000;
 const SERVER_READY_TIMEOUT_MS = 90 * 1000;
+const CORE_SERVICE_READY_TIMEOUT_MS = 60 * 1000;
+const CORE_SERVICE_HEALTH_TIMEOUT_MS = 10 * 1000;
+const FILE_OPERATION_RETRIES = 8;
 const TITLE_BAR_HEIGHT = 36;
 
 app.setName(PRODUCT_NAME);
@@ -40,8 +44,11 @@ let isStoppingForQuit = false;
 let localShellLoadId = 0;
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 let coreSetupPromise = null;
-let coreStandaloneSyncPromise = null;
 let coreUpdateInterval = null;
+let coreServiceProcess = null;
+let coreServiceUrl = null;
+let coreServiceToken = null;
+let coreServiceStartupPromise = null;
 let coreSetupState = {
   phase: "starting",
   message: "Starting Pi App...",
@@ -73,11 +80,14 @@ const DESKTOP_TRANSLATIONS = {
     "startup.preparingRuntime": "Preparing local runtime...",
     "startup.preparingCore": "Preparing Pi Core runtime...",
     "startup.syncingCore": "Preparing Pi Core runtime files...",
+    "startup.startingCoreService": "Starting Pi Core service...",
+    "startup.coreServiceReady": "Pi Core service ready",
     "startup.checkingTooling": "Checking local Node.js and npm...",
     "startup.coreReady": "Pi Core runtime ready",
     "startup.installingCore": "Installing Pi Core packages: {packages}",
     "startup.coreInstallFailed": "Pi Core could not be installed.",
     "startup.updatingCore": "Updating Pi Core packages...",
+    "startup.rollingBackCore": "Rolling back Pi Core runtime...",
     "startup.details": "Details",
     "common.openLog": "Open Log",
     "common.quit": "Quit",
@@ -121,11 +131,14 @@ const DESKTOP_TRANSLATIONS = {
     "startup.preparingRuntime": "正在准备本地运行时...",
     "startup.preparingCore": "正在准备 Pi Core 运行时...",
     "startup.syncingCore": "正在准备 Pi Core 运行文件...",
+    "startup.startingCoreService": "正在启动 Pi Core 服务...",
+    "startup.coreServiceReady": "Pi Core 服务已就绪",
     "startup.checkingTooling": "正在检查本地 Node.js 和 npm...",
     "startup.coreReady": "Pi Core 运行时已就绪",
     "startup.installingCore": "正在安装 Pi Core 包：{packages}",
     "startup.coreInstallFailed": "Pi Core 无法安装。",
     "startup.updatingCore": "正在更新 Pi Core 包...",
+    "startup.rollingBackCore": "正在回滚 Pi Core 运行时...",
     "startup.details": "详情",
     "common.openLog": "打开日志",
     "common.quit": "退出",
@@ -309,6 +322,10 @@ function getLogPath() {
   return path.join(app.getPath("userData"), "desktop.log");
 }
 
+function getCoreServiceEndpointPath() {
+  return path.join(app.getPath("userData"), "core-service.json");
+}
+
 function log(message, detail = "") {
   const body = detail ? `${message}\n${detail}` : message;
   const line = `[${new Date().toISOString()}] ${body}\n`;
@@ -320,6 +337,40 @@ function log(message, detail = "") {
   } catch {
     // Logging must never block startup.
   }
+}
+
+function writeCoreServiceEndpoint(url, token) {
+  const endpointPath = getCoreServiceEndpointPath();
+  const payload = `${JSON.stringify({ url, token, updatedAt: new Date().toISOString() }, null, 2)}\n`;
+  fs.mkdirSync(path.dirname(endpointPath), { recursive: true });
+  fs.writeFileSync(endpointPath, payload);
+}
+
+function clearCoreServiceEndpoint() {
+  try {
+    fs.rmSync(getCoreServiceEndpointPath(), { force: true });
+  } catch {
+    // Endpoint cleanup is best-effort.
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryFileOperation(label, operation, retries = FILE_OPERATION_RETRIES) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      const retryable = ["EBUSY", "EPERM", "ENOTEMPTY"].includes(error?.code);
+      if (!retryable || attempt === retries) break;
+      await delay(150 * (attempt + 1));
+    }
+  }
+  throw new Error(`${label} failed: ${lastError?.message || String(lastError)}`);
 }
 
 function getHomeDir() {
@@ -962,13 +1013,21 @@ async function ensureToolingAvailable() {
   await ensureNpmAvailable();
 }
 
-async function installCoreRuntime(reason) {
+function getCoreInstallPhase() {
+  return coreSetupState.phase === "updating" ? "updating" : "installing";
+}
+
+function createStagingRuntimeDir(runtimeDir) {
+  return path.join(runtimeDir, ".staging", `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`);
+}
+
+async function installCoreRuntimeToStaging(reason) {
   const runtimeDir = getRuntimeDir();
   const specs = getCoreSpecs();
-  ensureRuntimePackageJson(runtimeDir, specs);
-  pruneInvalidCorePackages(runtimeDir);
+  const stagingDir = createStagingRuntimeDir(runtimeDir);
+  ensureRuntimePackageJson(stagingDir, specs);
   emitCoreSetupState({
-    phase: "installing",
+    phase: getCoreInstallPhase(),
     message: reason,
     detail: desktopT("startup.checkingTooling"),
     runtimeDir,
@@ -977,36 +1036,103 @@ async function installCoreRuntime(reason) {
 
   const args = [
     "install",
+    "--omit=dev",
     "--no-audit",
     "--no-fund",
     ...specs.map((spec) => `${spec.name}@${spec.range}`),
   ];
   let detail = "";
   emitCoreSetupState({
-    phase: "installing",
+    phase: getCoreInstallPhase(),
     message: reason,
     detail: `npm ${args.join(" ")}`,
     runtimeDir,
   });
   await runNpmCommand(args, {
-    cwd: runtimeDir,
+    cwd: stagingDir,
     env: withDesktopPath({ ...process.env, FORCE_COLOR: "0" }),
     timeout: NPM_TIMEOUT_MS,
     onStdout: async (text) => {
       detail += text;
-      emitCoreSetupState({ phase: "installing", message: reason, detail, runtimeDir });
+      emitCoreSetupState({ phase: getCoreInstallPhase(), message: reason, detail, runtimeDir });
     },
     onStderr: async (text) => {
       detail += text;
-      emitCoreSetupState({ phase: "installing", message: reason, detail, runtimeDir });
+      emitCoreSetupState({ phase: getCoreInstallPhase(), message: reason, detail, runtimeDir });
     },
   });
 
-  const versions = readInstalledCoreVersions(runtimeDir);
+  const versions = readInstalledCoreVersions(stagingDir);
   const missing = missingCorePackages(versions);
   if (missing.length > 0) {
+    await fs.promises.rm(stagingDir, { recursive: true, force: true });
     throw new Error(`Pi Core install finished, but these packages are still missing: ${missing.join(", ")}`);
   }
+
+  return { stagingDir, specs, versions };
+}
+
+async function movePathIfExists(source, target) {
+  if (!fs.existsSync(source)) return false;
+  await fs.promises.mkdir(path.dirname(target), { recursive: true });
+  await retryFileOperation(`Move ${source} to ${target}`, () => fs.promises.rename(source, target));
+  return true;
+}
+
+async function replaceRuntimeFromStaging(stagingDir, runtimeDir) {
+  const transactionId = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+  const backupDir = path.join(runtimeDir, ".rollback", transactionId);
+  const items = ["node_modules", "package.json", "package-lock.json"];
+  const backedUp = new Set();
+  const installed = new Set();
+
+  const rollback = async () => {
+    for (const item of items) {
+      const target = path.join(runtimeDir, item);
+      const backup = path.join(backupDir, item);
+      if (installed.has(item)) {
+        await retryFileOperation(`Remove failed runtime ${item}`, () => removePathWithoutFollowingJunctionAsync(target));
+      }
+      if (backedUp.has(item) && fs.existsSync(backup)) {
+        await movePathIfExists(backup, target);
+      }
+    }
+  };
+
+  try {
+    await fs.promises.mkdir(backupDir, { recursive: true });
+    for (const item of items) {
+      const target = path.join(runtimeDir, item);
+      const backup = path.join(backupDir, item);
+      if (await movePathIfExists(target, backup)) backedUp.add(item);
+    }
+    for (const item of items) {
+      const source = path.join(stagingDir, item);
+      const target = path.join(runtimeDir, item);
+      if (await movePathIfExists(source, target)) installed.add(item);
+    }
+  } catch (error) {
+    await rollback().catch((rollbackError) => {
+      log("Pi Core rollback after failed replace also failed", rollbackError.stack || rollbackError.message);
+    });
+    throw error;
+  }
+
+  return {
+    rollback,
+    cleanup: async () => {
+      await fs.promises.rm(stagingDir, { recursive: true, force: true });
+      await fs.promises.rm(backupDir, { recursive: true, force: true });
+    },
+  };
+}
+
+async function installCoreRuntime(reason) {
+  const runtimeDir = getRuntimeDir();
+  const { stagingDir, specs } = await installCoreRuntimeToStaging(reason);
+  const transaction = await replaceRuntimeFromStaging(stagingDir, runtimeDir);
+  await transaction.cleanup();
+  const versions = readInstalledCoreVersions(runtimeDir);
 
   return {
     runtimeDir,
@@ -1068,13 +1194,10 @@ function startCoreSetup() {
     });
     runtimeInfo = await prepareCoreRuntimeWithRetry();
     log("Pi Core runtime ready", JSON.stringify(runtimeInfo.versions, null, 2));
-    if (serverUrl) {
-      const syncResult = await ensureCorePackagesInStandalone(runtimeInfo);
-      if (syncResult.changed) await restartNextServer();
-    }
+    await startCoreService(runtimeInfo);
     emitCoreSetupState({
       phase: "ready",
-      message: desktopT("startup.coreReady"),
+      message: desktopT("startup.coreServiceReady"),
       detail: "",
       runtimeDir: runtimeInfo.runtimeDir,
     });
@@ -1131,6 +1254,248 @@ async function checkRemoteCoreVersions() {
     remote[spec.name] = newestVersionFromNpmJson(stdout);
   }
   return remote;
+}
+
+function requestCoreServiceJson(pathAndSearch, options = {}) {
+  if (!coreServiceUrl || !coreServiceToken) {
+    return Promise.reject(new Error("Pi Core service is not running"));
+  }
+
+  const url = new URL(pathAndSearch, coreServiceUrl);
+  return new Promise((resolve, reject) => {
+    const req = http.request(url, {
+      method: options.method || "GET",
+      headers: {
+        Authorization: `Bearer ${coreServiceToken}`,
+        Accept: "application/json",
+      },
+      timeout: options.timeout || CORE_SERVICE_HEALTH_TIMEOUT_MS,
+    }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        if ((res.statusCode ?? 500) >= 400) {
+          reject(new Error(`Pi Core service returned ${res.statusCode}: ${body}`));
+          return;
+        }
+        try {
+          resolve(body ? JSON.parse(body) : {});
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    req.on("timeout", () => req.destroy(new Error(`Request timed out: ${url.href}`)));
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+async function waitForCoreServiceHealth(url, token, timeoutMs = CORE_SERVICE_READY_TIMEOUT_MS) {
+  const startedAt = Date.now();
+  const previousUrl = coreServiceUrl;
+  const previousToken = coreServiceToken;
+  coreServiceUrl = url;
+  coreServiceToken = token;
+  try {
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        await requestCoreServiceJson("/health", { timeout: 2000 });
+        return;
+      } catch {
+        await delay(250);
+      }
+    }
+    throw new Error(`Timed out waiting for Pi Core service health: ${url}`);
+  } catch (error) {
+    coreServiceUrl = previousUrl;
+    coreServiceToken = previousToken;
+    throw error;
+  }
+}
+
+function getCoreServiceScript() {
+  return path.join(__dirname, "core-service.js");
+}
+
+function parseReadyLine(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && parsed.type === "ready" && parsed.port) return parsed;
+  } catch {
+    // Ignore ordinary log output.
+  }
+  return null;
+}
+
+function startCoreService(info = runtimeInfo) {
+  if (coreServiceUrl && coreServiceProcess && !coreServiceProcess.killed) return Promise.resolve(coreServiceUrl);
+  if (coreServiceStartupPromise) return coreServiceStartupPromise;
+
+  coreServiceStartupPromise = doStartCoreService(info)
+    .finally(() => {
+      coreServiceStartupPromise = null;
+    });
+  return coreServiceStartupPromise;
+}
+
+async function doStartCoreService(info = runtimeInfo) {
+  const runtimeDir = info?.runtimeDir || getRuntimeDir();
+  const token = crypto.randomBytes(32).toString("hex");
+  const command = getNodeCommand();
+  const script = getCoreServiceScript();
+
+  emitCoreSetupState({
+    phase: "service-starting",
+    message: desktopT("startup.startingCoreService"),
+    detail: "",
+    runtimeDir,
+  });
+
+  log("Starting Pi Core service", `node=${command}\nscript=${script}\nruntime=${runtimeDir}`);
+
+  return new Promise((resolve, reject) => {
+    let ready = false;
+    let stdoutBuffer = "";
+    let output = "";
+    const child = spawn(command, [script], {
+      cwd: getAppRoot(),
+      env: withDesktopPath({
+        ...process.env,
+        FORCE_COLOR: "0",
+        PI_CORE_RUNTIME_DIR: runtimeDir,
+        PI_CORE_SERVICE_TOKEN: token,
+        PI_CORE_SERVICE_PORT: "0",
+      }),
+      shell: false,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    coreServiceProcess = child;
+
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Pi Core service did not become ready within ${CORE_SERVICE_READY_TIMEOUT_MS}ms.\n\n${output.slice(-3000)}`));
+    }, CORE_SERVICE_READY_TIMEOUT_MS);
+
+    const onReady = async (payload) => {
+      if (ready) return;
+      ready = true;
+      clearTimeout(timer);
+      const url = `http://127.0.0.1:${payload.port}`;
+      try {
+        await waitForCoreServiceHealth(url, token);
+        coreServiceUrl = url;
+        coreServiceToken = token;
+        writeCoreServiceEndpoint(url, token);
+        log("Pi Core service ready", `url=${url}\npid=${payload.pid || child.pid}`);
+        resolve(url);
+      } catch (error) {
+        child.kill();
+        reject(error);
+      }
+    };
+
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString();
+      output += text;
+      stdoutBuffer += text;
+      let newlineIndex = stdoutBuffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        if (line) {
+          const readyPayload = parseReadyLine(line);
+          if (readyPayload) onReady(readyPayload);
+          else log("Pi Core service output", line);
+        }
+        newlineIndex = stdoutBuffer.indexOf("\n");
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString();
+      output += text;
+      log("Pi Core service error", text.trim());
+    });
+
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      if (coreServiceProcess === child) {
+        coreServiceProcess = null;
+        coreServiceUrl = null;
+        coreServiceToken = null;
+      }
+      reject(error);
+    });
+
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      if (!ready) {
+        if (coreServiceProcess === child) {
+          coreServiceProcess = null;
+          coreServiceUrl = null;
+          coreServiceToken = null;
+        }
+        reject(new Error(`Pi Core service exited before it was ready with code ${code}.\n\n${output.slice(-3000)}`));
+        return;
+      }
+      log("Pi Core service exited", `code=${code}`);
+      if (coreServiceProcess === child) {
+        coreServiceProcess = null;
+        coreServiceUrl = null;
+        coreServiceToken = null;
+      }
+    });
+  });
+}
+
+function stopCoreService(options = {}) {
+  const { clearEndpoint = false } = options;
+  return new Promise((resolve) => {
+    const child = coreServiceProcess;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (clearEndpoint) clearCoreServiceEndpoint();
+      coreServiceProcess = null;
+      coreServiceUrl = null;
+      coreServiceToken = null;
+      resolve();
+    };
+
+    if (!child) {
+      finish();
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish();
+    }, 5000);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      finish();
+    });
+    requestCoreServiceJson("/runtime/shutdown", { method: "POST", timeout: 1500 })
+      .catch(() => {
+        try {
+          child.kill();
+        } catch {
+          finish();
+        }
+      });
+  });
+}
+
+async function restartCoreService() {
+  if (!runtimeInfo) runtimeInfo = getInitialRuntimeInfo();
+  await stopCoreService({ clearEndpoint: false });
+  await startCoreService(runtimeInfo);
 }
 
 async function findFreePort() {
@@ -1191,167 +1556,6 @@ async function removePathWithoutFollowingJunctionAsync(target) {
   await fs.promises.rm(target, { recursive: true, force: true });
 }
 
-function removePathWithoutFollowingJunction(target) {
-  if (!fs.existsSync(target)) return;
-  const stat = fs.lstatSync(target);
-  if (stat.isSymbolicLink()) {
-    fs.unlinkSync(target);
-    return;
-  }
-  fs.rmSync(target, { recursive: true, force: true });
-}
-
-function needsCorePackageSync(source, target) {
-  let sourcePkg = null;
-  let targetPkg = null;
-  try {
-    sourcePkg = readJson(path.join(source, "package.json"));
-    targetPkg = readJson(path.join(target, "package.json"));
-  } catch {
-    return true;
-  }
-
-  if (!hasValidPackageEntry(source, sourcePkg)) return false;
-  if (sourcePkg.version !== targetPkg.version) return true;
-  return !hasValidPackageEntry(target, targetPkg);
-}
-
-function getPreservedStandaloneCoreDir(runtimeDir) {
-  return path.join(runtimeDir, ".standalone-core-preserve");
-}
-
-async function preserveStandaloneCorePackages(runtimeDir) {
-  const startedAt = Date.now();
-  const runtimeStandalone = getRuntimeStandaloneDir(runtimeDir);
-  const standaloneNodeModules = path.join(runtimeStandalone, "node_modules");
-  const preserveDir = getPreservedStandaloneCoreDir(runtimeDir);
-  const preserved = [];
-
-  await fs.promises.rm(preserveDir, { recursive: true, force: true });
-  for (const packageName of CORE_PACKAGES) {
-    const source = getCorePackagePath(standaloneNodeModules, packageName);
-    const target = getCorePackagePath(preserveDir, packageName);
-    try {
-      const stat = await fs.promises.lstat(source);
-      if (stat.isSymbolicLink()) {
-        log("Pi Core preserve skipped", `${packageName}\nreason=link`);
-        continue;
-      }
-      const pkg = readJson(path.join(source, "package.json"));
-      if (!hasValidPackageEntry(source, pkg)) {
-        log("Pi Core preserve skipped", `${packageName}\nreason=invalid package`);
-        continue;
-      }
-      await fs.promises.mkdir(path.dirname(target), { recursive: true });
-      await fs.promises.rename(source, target);
-      preserved.push({ packageName, version: pkg.version ?? "unknown" });
-    } catch (error) {
-      if (error?.code !== "ENOENT") {
-        log("Pi Core preserve skipped", `${packageName}\nreason=${error.message || String(error)}`);
-      }
-    }
-  }
-
-  log(
-    "Pi Core preserve complete",
-    `count=${preserved.length}\npackages=${preserved.map((item) => `${item.packageName}@${item.version}`).join(", ") || "none"}\nelapsed=${Date.now() - startedAt}ms`,
-  );
-  return preserved;
-}
-
-async function restoreStandaloneCorePackages(runtimeDir) {
-  const startedAt = Date.now();
-  const runtimeStandalone = getRuntimeStandaloneDir(runtimeDir);
-  const standaloneNodeModules = path.join(runtimeStandalone, "node_modules");
-  const preserveDir = getPreservedStandaloneCoreDir(runtimeDir);
-  const restored = [];
-
-  try {
-    if (!fs.existsSync(preserveDir)) return { restored };
-    for (const packageName of CORE_PACKAGES) {
-      const source = getCorePackagePath(preserveDir, packageName);
-      const target = getCorePackagePath(standaloneNodeModules, packageName);
-      if (!fs.existsSync(source)) continue;
-      await removePathWithoutFollowingJunctionAsync(target);
-      await fs.promises.mkdir(path.dirname(target), { recursive: true });
-      await fs.promises.rename(source, target);
-      restored.push(packageName);
-    }
-    log(
-      "Pi Core restore complete",
-      `count=${restored.length}\npackages=${restored.join(", ") || "none"}\nelapsed=${Date.now() - startedAt}ms`,
-    );
-    return { restored };
-  } finally {
-    await fs.promises.rm(preserveDir, { recursive: true, force: true });
-  }
-}
-
-async function ensureCorePackagesInStandalone(info = runtimeInfo, reason = desktopT("startup.syncingCore")) {
-  if (coreStandaloneSyncPromise) return coreStandaloneSyncPromise;
-
-  coreStandaloneSyncPromise = (async () => {
-    const startedAt = Date.now();
-    let changed = false;
-    if (!info?.runtimeDir) return { changed };
-
-    const runtimeNodeModules = getRuntimeNodeModules(info.runtimeDir);
-    const standaloneNodeModules = path.join(getRuntimeStandaloneDir(info.runtimeDir), "node_modules");
-    if (!fs.existsSync(standaloneNodeModules)) {
-      log("Pi Core standalone sync skipped", `standalone node_modules missing\nelapsed=${Date.now() - startedAt}ms`);
-      return { changed };
-    }
-
-    emitCoreSetupState({
-      phase: coreSetupState.phase === "ready" ? "ready" : "starting",
-      message: reason,
-      detail: "",
-      runtimeDir: info.runtimeDir,
-    });
-
-    for (const packageName of CORE_PACKAGES) {
-      const packageStartedAt = Date.now();
-      const source = getCorePackagePath(runtimeNodeModules, packageName);
-      const target = getCorePackagePath(standaloneNodeModules, packageName);
-      let sourcePkg = null;
-      try {
-        sourcePkg = readJson(path.join(source, "package.json"));
-      } catch {
-        log("Pi Core package sync skipped", `${packageName}\nsource package missing\nelapsed=${Date.now() - packageStartedAt}ms`);
-        continue;
-      }
-      if (!hasValidPackageEntry(source, sourcePkg)) {
-        log("Pi Core package sync skipped", `${packageName}\nsource package invalid\nelapsed=${Date.now() - packageStartedAt}ms`);
-        continue;
-      }
-      if (!needsCorePackageSync(source, target)) {
-        log("Pi Core package sync skipped", `${packageName}\nversion=${sourcePkg.version ?? "unknown"}\nelapsed=${Date.now() - packageStartedAt}ms`);
-        continue;
-      }
-
-      try {
-        await removePathWithoutFollowingJunctionAsync(target);
-        await fs.promises.mkdir(path.dirname(target), { recursive: true });
-        await fs.promises.cp(source, target, { recursive: true, dereference: true });
-        changed = true;
-        log(
-          "Copied Pi Core package into standalone runtime",
-          `${packageName}\nversion=${sourcePkg.version ?? "unknown"}\nsource=${source}\ntarget=${target}\nelapsed=${Date.now() - packageStartedAt}ms`,
-        );
-      } catch (error) {
-        throw new Error(`Could not copy ${packageName} into the standalone runtime.\n\n${error.message}`);
-      }
-    }
-
-    log("Pi Core standalone sync complete", `changed=${changed}\nelapsed=${Date.now() - startedAt}ms`);
-    return { changed };
-  })().finally(() => {
-    coreStandaloneSyncPromise = null;
-  });
-
-  return coreStandaloneSyncPromise;
-}
-
 async function syncRuntimeStandalone(appRoot, runtimeDir) {
   const packagedStandalone = path.join(appRoot, ".next", "standalone");
   const runtimeStandalone = getRuntimeStandaloneDir(runtimeDir);
@@ -1360,6 +1564,7 @@ async function syncRuntimeStandalone(appRoot, runtimeDir) {
   const runtimeServer = path.join(runtimeStandalone, "server.js");
 
   if (packagedBuildId && packagedBuildId === runtimeBuildId && fs.existsSync(runtimeServer)) {
+    await pruneStandaloneCorePackages(runtimeDir);
     return runtimeServer;
   }
 
@@ -1370,19 +1575,25 @@ async function syncRuntimeStandalone(appRoot, runtimeDir) {
     detail: "",
     runtimeDir,
   });
-  await preserveStandaloneCorePackages(runtimeDir);
-  await fs.promises.rm(runtimeStandalone, { recursive: true, force: true });
+  await retryFileOperation("Remove stale Next.js standalone runtime", () => fs.promises.rm(runtimeStandalone, { recursive: true, force: true }));
   await fs.promises.mkdir(path.dirname(runtimeStandalone), { recursive: true });
   await fs.promises.cp(packagedStandalone, runtimeStandalone, { recursive: true });
-  await restoreStandaloneCorePackages(runtimeDir);
+  await pruneStandaloneCorePackages(runtimeDir);
   return runtimeServer;
 }
 
-function buildNodePath(runtimeNodeModules) {
+async function pruneStandaloneCorePackages(runtimeDir) {
+  const standaloneNodeModules = path.join(getRuntimeStandaloneDir(runtimeDir), "node_modules");
+  for (const packageName of CORE_PACKAGES) {
+    const target = getCorePackagePath(standaloneNodeModules, packageName);
+    await retryFileOperation(`Remove duplicated ${packageName} from standalone runtime`, () => removePathWithoutFollowingJunctionAsync(target));
+  }
+}
+
+function buildNodePath() {
   return [
-    runtimeNodeModules,
     path.join(getAppRoot(), ".next", "standalone", "node_modules"),
-    path.join(runtimeInfo?.runtimeDir ?? "", "standalone", "node_modules"),
+    runtimeInfo?.runtimeDir ? path.join(runtimeInfo.runtimeDir, "standalone", "node_modules") : null,
     path.join(getAppRoot(), "node_modules"),
     process.env.NODE_PATH,
   ].filter(Boolean).join(path.delimiter);
@@ -1429,7 +1640,6 @@ async function doStartNextServer() {
   const standaloneServer = devMode
     ? packagedStandaloneServer
     : await syncRuntimeStandalone(appRoot, runtimeInfo.runtimeDir);
-  if (!devMode) await ensureCorePackagesInStandalone(runtimeInfo);
   const command = getNodeCommand();
   const mode = devMode ? "dev" : "standalone";
   const args = devMode
@@ -1438,8 +1648,11 @@ async function doStartNextServer() {
   const env = withDesktopPath({
     ...process.env,
     HOSTNAME: "127.0.0.1",
-    NODE_PATH: buildNodePath(runtimeInfo.nodeModules),
-    PI_WEB_CORE_RUNTIME_DIR: runtimeInfo.runtimeDir,
+    NODE_PATH: buildNodePath(),
+    PI_APP_DESKTOP: "1",
+    PI_APP_USER_DATA_DIR: app.getPath("userData"),
+    PI_CORE_SERVICE_URL: coreServiceUrl || "",
+    PI_CORE_SERVICE_TOKEN: coreServiceToken || "",
     NEXT_TELEMETRY_DISABLED: "1",
     PORT: String(port),
   });
@@ -1537,6 +1750,14 @@ function fetchJson(url, timeoutMs = 3000) {
 }
 
 async function hasBusyAgentSessions() {
+  if (coreServiceUrl) {
+    try {
+      const state = await requestCoreServiceJson("/runtime", { timeout: 3000 });
+      return Boolean(state.busy);
+    } catch {
+      return false;
+    }
+  }
   if (!serverUrl) return false;
   try {
     const state = await fetchJson(`${serverUrl}/api/desktop/runtime`);
@@ -1546,12 +1767,76 @@ async function hasBusyAgentSessions() {
   }
 }
 
-async function restartNextServer() {
-  await stopNextServer();
-  const url = await startNextServer();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    isLoadingLocalShell = false;
-    await mainWindow.loadURL(url);
+async function updateCoreRuntime(reason = desktopT("startup.updatingCore")) {
+  if (await hasBusyAgentSessions()) {
+    const error = new Error(desktopT("dialog.busyError"));
+    error.code = "busy";
+    throw error;
+  }
+
+  const runtimeDir = getRuntimeDir();
+  let stagingDir = null;
+  let transaction = null;
+
+  emitCoreSetupState({
+    phase: "updating",
+    message: reason,
+    detail: "",
+    runtimeDir,
+  });
+
+  try {
+    const staged = await installCoreRuntimeToStaging(reason);
+    stagingDir = staged.stagingDir;
+    await stopCoreService({ clearEndpoint: false });
+    transaction = await replaceRuntimeFromStaging(stagingDir, runtimeDir);
+    runtimeInfo = {
+      runtimeDir,
+      nodeModules: getRuntimeNodeModules(runtimeDir),
+      specs: getCoreSpecs(),
+      versions: readInstalledCoreVersions(runtimeDir),
+    };
+    await startCoreService(runtimeInfo);
+    await transaction.cleanup();
+    emitCoreSetupState({
+      phase: "ready",
+      message: desktopT("startup.coreServiceReady"),
+      detail: "",
+      runtimeDir,
+    });
+    return runtimeInfo;
+  } catch (error) {
+    emitCoreSetupState({
+      phase: "rolling-back",
+      message: desktopT("startup.rollingBackCore"),
+      detail: error.stack || error.message || String(error),
+      runtimeDir,
+    });
+    await stopCoreService({ clearEndpoint: false }).catch(() => {});
+    if (transaction) {
+      await transaction.rollback().catch((rollbackError) => {
+        log("Pi Core rollback failed", rollbackError.stack || rollbackError.message);
+      });
+      await transaction.cleanup().catch(() => {});
+    } else if (stagingDir) {
+      await fs.promises.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    }
+    runtimeInfo = {
+      runtimeDir,
+      nodeModules: getRuntimeNodeModules(runtimeDir),
+      specs: getCoreSpecs(),
+      versions: readInstalledCoreVersions(runtimeDir),
+    };
+    await startCoreService(runtimeInfo).catch((restartError) => {
+      log("Pi Core service restart after rollback failed", restartError.stack || restartError.message);
+    });
+    emitCoreSetupState({
+      phase: "error",
+      message: desktopT("startup.coreInstallFailed"),
+      detail: error.stack || error.message || String(error),
+      runtimeDir,
+    });
+    throw error;
   }
 }
 
@@ -1562,6 +1847,7 @@ async function loadMainAppWhenReady() {
       desktopT("startup.startingService"),
       coreSetupState.detail || "",
     );
+    await startCoreSetup();
     const url = await startNextServer();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     isLoadingLocalShell = false;
@@ -1635,29 +1921,7 @@ async function handleCoreUpdate({ silent = false } = {}) {
   });
   if (result.response !== 0) return;
 
-  emitCoreSetupState({
-    phase: "installing",
-    message: desktopT("startup.updatingCore"),
-    detail: "",
-    runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
-  });
-  await installCoreRuntime(desktopT("startup.updatingCore"));
-  runtimeInfo = {
-    runtimeDir: getRuntimeDir(),
-    nodeModules: getRuntimeNodeModules(getRuntimeDir()),
-    specs: getCoreSpecs(),
-    versions: readInstalledCoreVersions(getRuntimeDir()),
-  };
-  const syncResult = await ensureCorePackagesInStandalone(runtimeInfo);
-  if (syncResult.changed) {
-    await restartNextServer();
-  }
-  emitCoreSetupState({
-    phase: "ready",
-    message: desktopT("startup.coreReady"),
-    detail: "",
-    runtimeDir: runtimeInfo.runtimeDir,
-  });
+  await updateCoreRuntime(desktopT("startup.updatingCore"));
 }
 
 function registerDesktopIpc() {
@@ -1694,29 +1958,7 @@ function registerDesktopIpc() {
       throw error;
     }
 
-    emitCoreSetupState({
-      phase: "installing",
-      message: desktopT("startup.updatingCore"),
-      detail: "",
-      runtimeDir: runtimeInfo?.runtimeDir ?? getRuntimeDir(),
-    });
-    await installCoreRuntime(desktopT("startup.updatingCore"));
-    runtimeInfo = {
-      runtimeDir: getRuntimeDir(),
-      nodeModules: getRuntimeNodeModules(getRuntimeDir()),
-      specs: getCoreSpecs(),
-      versions: readInstalledCoreVersions(getRuntimeDir()),
-    };
-    const syncResult = await ensureCorePackagesInStandalone(runtimeInfo);
-    if (syncResult.changed) {
-      await restartNextServer();
-    }
-    emitCoreSetupState({
-      phase: "ready",
-      message: desktopT("startup.coreReady"),
-      detail: "",
-      runtimeDir: runtimeInfo.runtimeDir,
-    });
+    await updateCoreRuntime(desktopT("startup.updatingCore"));
     return getCoreStatus(await checkRemoteCoreVersions().catch(() => null));
   });
   ipcMain.handle("piDesktop:openRuntimeFolder", async () => shell.openPath(getRuntimeDir()));
@@ -1891,7 +2133,7 @@ function createMenu() {
         },
         {
           label: desktopT("menu.restartService"),
-          click: () => restartNextServer().catch((error) => {
+          click: () => restartCoreService().catch((error) => {
             dialog.showErrorBox(desktopT("dialog.restartFailed"), error.message);
           }),
         },
@@ -2012,10 +2254,13 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", (event) => {
-  if (!nextProcess || isStoppingForQuit) return;
+  if ((!nextProcess && !coreServiceProcess) || isStoppingForQuit) return;
   event.preventDefault();
   isStoppingForQuit = true;
-  stopNextServer().finally(() => app.quit());
+  Promise.all([
+    stopNextServer(),
+    stopCoreService({ clearEndpoint: true }),
+  ]).finally(() => app.quit());
 });
 
 app.on("window-all-closed", () => {

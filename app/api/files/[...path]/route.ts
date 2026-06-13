@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import { listAllSessions } from "@/lib/session-reader";
+import { fetchCoreJson } from "@/lib/core-proxy";
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -98,6 +98,10 @@ declare global {
 const ALLOWED_ROOTS_TTL_MS = 5_000;
 const WINDOWS_ABSOLUTE_RE = /^[a-zA-Z]:[\\/]/;
 
+interface SessionRootInfo {
+  cwd?: string;
+}
+
 function normalizeSlashes(filePath: string): string {
   return filePath.replace(/\\/g, "/");
 }
@@ -118,7 +122,14 @@ async function getAllowedRoots(): Promise<Set<string>> {
   const cached = globalThis.__piAllowedRootsCache;
   if (cached && cached.expiresAt > now) return cached.roots;
 
-  const sessions = await listAllSessions();
+  let sessions: SessionRootInfo[] = [];
+  const proxied = await fetchCoreJson<{ sessions?: SessionRootInfo[] }>("/api/sessions");
+  if (proxied?.sessions) {
+    sessions = proxied.sessions;
+  } else {
+    const { listAllSessions } = await import("@/lib/session-reader");
+    sessions = await listAllSessions();
+  }
   const roots = new Set<string>();
   for (const s of sessions) {
     if (s.cwd) roots.add(s.cwd);
