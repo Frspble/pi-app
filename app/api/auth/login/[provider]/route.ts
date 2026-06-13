@@ -1,4 +1,4 @@
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,9 @@ export async function POST(
   { params }: { params: Promise<{ provider: string }> }
 ) {
   const { provider } = await params;
+  const proxied = await proxyToCoreService(req);
+  if (proxied) return proxied;
+
   const { token, code } = (await req.json()) as { token?: string; code?: string };
 
   if (!token || !code) {
@@ -45,6 +48,10 @@ export async function GET(
   { params }: { params: Promise<{ provider: string }> }
 ) {
   const { provider } = await params;
+  const proxied = await proxyToCoreService(req);
+  if (proxied) return proxied;
+
+  const { AuthStorage } = await import("@earendil-works/pi-coding-agent");
 
   const encoder = new TextEncoder();
   const send = (controller: ReadableStreamDefaultController, data: unknown) => {

@@ -1,13 +1,17 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { NextResponse } from "next/server";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ provider: string }> };
 
 // GET /api/auth/api-key/[provider] — returns auth status (never returns the actual key)
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
   const { provider } = await params;
+  const proxied = await proxyToCoreService(req);
+  if (proxied) return proxied;
+
+  const { AuthStorage, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
   const status = registry.getProviderAuthStatus(provider);
@@ -20,6 +24,10 @@ export async function GET(_req: Request, { params }: Params) {
 export async function POST(req: Request, { params }: Params) {
   const { provider } = await params;
   try {
+    const proxied = await proxyToCoreService(req);
+    if (proxied) return proxied;
+
+    const { AuthStorage } = await import("@earendil-works/pi-coding-agent");
     const { apiKey } = await req.json() as { apiKey?: string };
     if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
       return NextResponse.json({ error: "apiKey is required" }, { status: 400 });
@@ -33,9 +41,13 @@ export async function POST(req: Request, { params }: Params) {
 }
 
 // DELETE /api/auth/api-key/[provider] — removes stored API key
-export async function DELETE(_req: Request, { params }: Params) {
+export async function DELETE(req: Request, { params }: Params) {
   const { provider } = await params;
   try {
+    const proxied = await proxyToCoreService(req);
+    if (proxied) return proxied;
+
+    const { AuthStorage } = await import("@earendil-works/pi-coding-agent");
     const authStorage = AuthStorage.create();
     authStorage.remove(provider);
     return NextResponse.json({ success: true });

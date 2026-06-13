@@ -1,13 +1,27 @@
 import { NextResponse } from "next/server";
 import { existsSync } from "fs";
-import { startRpcSession } from "@/lib/rpc-manager";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 // POST /api/agent/new  body: { cwd: string; type: string; message: string; ... }
 // Spawns a brand-new pi session and immediately sends the first command.
 // Returns { sessionId, data } where sessionId is pi's real session id.
 export async function POST(req: Request) {
   try {
-    const body = await req.json() as { cwd?: string; [key: string]: unknown };
+    const requestBody = await req.clone().json().catch(() => null) as { cwd?: unknown } | null;
+    const proxied = await proxyToCoreService(req);
+    if (proxied) {
+      if (proxied.ok && typeof requestBody?.cwd === "string") {
+        globalThis.__piAllowedRootsCache?.roots.add(requestBody.cwd);
+      }
+      return proxied;
+    }
+
+    if (!requestBody || typeof requestBody !== "object") {
+      return NextResponse.json({ error: "JSON body is required" }, { status: 400 });
+    }
+
+    const { startRpcSession } = await import("@/lib/rpc-manager");
+    const body = requestBody as { cwd?: string; [key: string]: unknown };
     const { cwd, ...command } = body;
 
     if (!cwd || typeof cwd !== "string") {

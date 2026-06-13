@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { resolveSessionPath, buildSessionContext } from "@/lib/session-reader";
+import { proxyToCoreService } from "@/lib/core-proxy";
 
 export async function GET(
   req: Request,
@@ -11,6 +10,13 @@ export async function GET(
   const leafId = url.searchParams.get("leafId") ?? undefined;
 
   try {
+    const proxied = await proxyToCoreService(req);
+    if (proxied) return proxied;
+
+    const [{ SessionManager }, { resolveSessionPath, buildSessionContext }] = await Promise.all([
+      import("@earendil-works/pi-coding-agent"),
+      import("@/lib/session-reader"),
+    ]);
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
