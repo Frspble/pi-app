@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   macos:
     name: macOS desktop package
@@ -38,10 +41,11 @@ jobs:
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: pi-agent-web-macos
+          name: pi-app-macos
           path: |
             dist-desktop/*.dmg
             dist-desktop/*.zip
+          if-no-files-found: error
 
   windows:
     name: Windows desktop package
@@ -65,15 +69,46 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build Next app
-        run: npm run build
-
       - name: Build Windows package
-        run: npx electron-builder --win --publish never
+        run: npm run desktop:pack:win
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: pi-agent-web-windows
+          name: pi-app-windows
           path: |
             dist-desktop/*.exe
+            dist-desktop/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - macos
+      - windows
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          mapfile -d '' assets < <(find release-assets -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.zip' \) -print0 | sort -z)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release assets found" >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$TAG_NAME" "${assets[@]}" --title "$TAG_NAME" --generate-notes
+          fi
