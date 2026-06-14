@@ -10,6 +10,13 @@ import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useI18n } from "@/hooks/useI18n";
 
+export interface CurrentModelInfo {
+  provider: string;
+  modelId: string;
+  name?: string;
+  contextWindow?: number;
+}
+
 interface Props {
   session: SessionInfo | null;
   newSessionCwd: string | null;
@@ -22,6 +29,7 @@ interface Props {
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsChange?: (stats: { tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; cost?: number } | null) => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
+  onModelInfoChange?: (model: CurrentModelInfo | null) => void;
 }
 
 function phaseLabel(phase: AgentPhase, t: ReturnType<typeof useI18n>["t"]): string {
@@ -91,7 +99,7 @@ function Typewriter({ phrases }: { phrases: string[] }) {
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onModelInfoChange }: Props) {
   const { t } = useI18n();
   const {
     loading, error, messages, entryIds, streamState,
@@ -149,6 +157,26 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     onContextUsageChange?.(contextUsageRef.current);
   }, [ctxKey, onContextUsageChange]);
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
+
+  const modelInfo = displayModelValue
+    ? modelList.find((model) => model.provider === displayModelValue.provider && model.id === displayModelValue.modelId)
+    : null;
+  const modelInfoKey = displayModelValue
+    ? `${displayModelValue.provider}|${displayModelValue.modelId}|${modelInfo?.name ?? ""}|${modelInfo?.contextWindow ?? ""}`
+    : null;
+  const modelInfoRef = useRef<CurrentModelInfo | null>(null);
+  modelInfoRef.current = displayModelValue
+    ? {
+        provider: displayModelValue.provider,
+        modelId: displayModelValue.modelId,
+        ...(modelInfo?.name ? { name: modelInfo.name } : {}),
+        ...(typeof modelInfo?.contextWindow === "number" ? { contextWindow: modelInfo.contextWindow } : {}),
+      }
+    : null;
+  useEffect(() => {
+    onModelInfoChange?.(modelInfoRef.current);
+  }, [modelInfoKey, onModelInfoChange]);
+  useEffect(() => () => { onModelInfoChange?.(null); }, [onModelInfoChange]);
 
   const onDrop = useCallback((files: File[]) => {
     chatInputRef?.current?.addImages(files);

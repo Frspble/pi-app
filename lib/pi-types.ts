@@ -9,6 +9,7 @@ export interface ContextUsage {
 export interface ModelLike {
   id: string;
   provider: string;
+  contextWindow?: number;
 }
 
 export interface ToolInfo {

@@ -321,7 +321,11 @@ class AgentSessionWrapper {
           isCompacting: this.inner.isCompacting,
           autoCompactionEnabled: this.inner.autoCompactionEnabled,
           autoRetryEnabled: this.inner.autoRetryEnabled,
-          model: model ? { id: model.id, provider: model.provider } : undefined,
+          model: model ? {
+            id: model.id,
+            provider: model.provider,
+            ...(typeof model.contextWindow === "number" ? { contextWindow: model.contextWindow } : {}),
+          } : undefined,
           messageCount: 0,
           pendingMessageCount: 0,
           contextUsage: contextUsage
@@ -548,9 +552,15 @@ async function handleAgentNew(req, res) {
   sendJson(res, { success: true, sessionId: realSessionId, data: result });
 }
 
-async function handleAgent(req, res, id) {
+async function handleAgent(req, res, id, url) {
   if (req.method === "GET") {
-    const session = getRpcSession(id);
+    let session = getRpcSession(id);
+    if ((!session || !session.isAlive()) && url.searchParams.has("ensureState")) {
+      const filePath = await resolveSessionPath(id);
+      if (!filePath) return sendJson(res, { error: "Session not found" }, 404);
+      const cwd = pi.SessionManager.open(filePath).getHeader()?.cwd || process.cwd();
+      ({ session } = await startRpcSession(id, filePath, cwd));
+    }
     if (!session || !session.isAlive()) return sendJson(res, { running: false });
     const state = await session.send({ type: "get_state" });
     return sendJson(res, { running: true, state });
@@ -751,7 +761,17 @@ async function handleModels(req, res) {
     const authStorage = pi.AuthStorage.create();
     const registry = pi.ModelRegistry.create(authStorage);
     const available = registry.getAvailable();
-    modelList = available.map((model) => ({ id: model.id, name: model.name, provider: model.provider }));
+    const configuredContextWindows = readConfiguredContextWindows();
+    modelList = available.map((model) => ({
+      id: model.id,
+      name: model.name,
+      provider: model.provider,
+      ...(typeof model.contextWindow === "number"
+        ? { contextWindow: model.contextWindow }
+        : configuredContextWindows.has(`${model.provider}:${model.id}`)
+          ? { contextWindow: configuredContextWindows.get(`${model.provider}:${model.id}`) }
+          : {}),
+    }));
     for (const model of available) {
       const key = `${model.provider}:${model.id}`;
       nameMap.set(key, model.name);
@@ -778,6 +798,25 @@ function readModelsJson() {
   } catch {
     return { providers: {} };
   }
+}
+
+function readConfiguredContextWindows() {
+  const result = new Map();
+  const modelsJson = readModelsJson();
+  if (!modelsJson || typeof modelsJson !== "object" || Array.isArray(modelsJson)) return result;
+  const providers = modelsJson.providers;
+  if (!providers || typeof providers !== "object" || Array.isArray(providers)) return result;
+  for (const [provider, config] of Object.entries(providers)) {
+    const models = config && typeof config === "object" && !Array.isArray(config) ? config.models : undefined;
+    if (!Array.isArray(models)) continue;
+    for (const model of models) {
+      if (!model || typeof model !== "object" || Array.isArray(model)) continue;
+      if (typeof model.id === "string" && typeof model.contextWindow === "number") {
+        result.set(`${provider}:${model.id}`, model.contextWindow);
+      }
+    }
+  }
+  return result;
 }
 
 function writeModelsJson(data) {
@@ -1144,7 +1183,7 @@ async function handleRequest(req, res) {
     if (segments[1] === "sessions" && segments.length === 3) return handleSession(req, res, segments[2], url);
     if (segments[1] === "agent" && segments[2] === "new") return handleAgentNew(req, res);
     if (segments[1] === "agent" && segments[3] === "events") return handleAgentEvents(req, res, segments[2]);
-    if (segments[1] === "agent" && segments.length === 3) return handleAgent(req, res, segments[2]);
+    if (segments[1] === "agent" && segments.length === 3) return handleAgent(req, res, segments[2], url);
     if (segments[1] === "models" && segments.length === 2) return handleModels(req, res);
     if (segments[1] === "models-config" && segments[2] === "test") return handleModelsConfigTest(req, res);
     if (segments[1] === "models-config" && segments.length === 2) return handleModelsConfig(req, res);

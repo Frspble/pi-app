@@ -19,6 +19,25 @@ export interface SessionData {
   };
 }
 
+export interface ModelListEntry {
+  id: string;
+  name: string;
+  provider: string;
+  contextWindow?: number;
+}
+
+function normalizeModelRef(model: unknown): { provider: string; modelId: string } | null {
+  if (!model || typeof model !== "object") return null;
+  const raw = model as { provider?: unknown; modelId?: unknown; id?: unknown };
+  if (typeof raw.provider !== "string") return null;
+  const modelId = typeof raw.modelId === "string"
+    ? raw.modelId
+    : typeof raw.id === "string"
+      ? raw.id
+      : null;
+  return modelId ? { provider: raw.provider, modelId } : null;
+}
+
 interface StreamingState {
   isStreaming: boolean;
   streamingMessage: Partial<AgentMessage> | null;
@@ -99,7 +118,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [streamState, dispatch] = useReducer(streamReducer, { isStreaming: false, streamingMessage: null });
   const [agentRunning, setAgentRunning] = useState(false);
   const [modelNames, setModelNames] = useState<Record<string, string>>({});
-  const [modelList, setModelList] = useState<{ id: string; name: string; provider: string }[]>([]);
+  const [modelList, setModelList] = useState<ModelListEntry[]>([]);
   const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, string[]>>({});
   const [modelThinkingLevelMaps, setModelThinkingLevelMaps] = useState<Record<string, Record<string, string | null>>>({});
   const [newSessionModel, setNewSessionModelState] = useState<{ provider: string; modelId: string } | null>(null);
@@ -165,7 +184,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return null;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as SessionData & { agentState?: { running: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean; contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; thinkingLevel?: string } } };
+      const raw = await res.json() as SessionData & { agentState?: { running: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean; contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; thinkingLevel?: string } } };
+      const d = {
+        ...raw,
+        context: {
+          ...raw.context,
+          model: normalizeModelRef(raw.context.model),
+        },
+      };
       setData(d);
       setActiveLeafId(d.leafId);
       setMessages(d.context.messages);
@@ -612,7 +638,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   // Load model list
   useEffect(() => {
-    fetch("/api/models").then((r) => r.json()).then((d: { models: Record<string, string>; modelList?: { id: string; name: string; provider: string }[]; defaultModel?: { provider: string; modelId: string } | null; thinkingLevels?: Record<string, string[]>; thinkingLevelMaps?: Record<string, Record<string, string | null>> }) => {
+    fetch("/api/models").then((r) => r.json()).then((d: { models: Record<string, string>; modelList?: ModelListEntry[]; defaultModel?: { provider: string; modelId: string } | null; thinkingLevels?: Record<string, string[]>; thinkingLevelMaps?: Record<string, Record<string, string | null>> }) => {
       setModelNames(d.models);
       if (d.thinkingLevels) setModelThinkingLevels(d.thinkingLevels);
       if (d.thinkingLevelMaps) setModelThinkingLevelMaps(d.thinkingLevelMaps);

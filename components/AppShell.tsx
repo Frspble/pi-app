@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, type CSSProperties, type FocusEvent, type MouseEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SessionSidebar } from "./SessionSidebar";
-import { ChatWindow } from "./ChatWindow";
+import { ChatWindow, type CurrentModelInfo } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { ModelsConfig } from "./ModelsConfig";
@@ -14,6 +14,16 @@ import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
+
+type ElectronDragStyle = CSSProperties & {
+  WebkitAppRegion?: "drag" | "no-drag";
+};
+
+type TopBarTooltip = {
+  text: string;
+  x: number;
+  y: number;
+};
 
 function PiCoreStartupOverlay({ state }: { state: PiCoreSetupState | null }) {
   const { t } = useI18n();
@@ -192,7 +202,10 @@ export function AppShell() {
   }, []);
 
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
+  const [systemPromptLoading, setSystemPromptLoading] = useState(false);
+  const [systemPromptError, setSystemPromptError] = useState<string | null>(null);
   const systemBtnRef = useRef<HTMLButtonElement>(null);
+  const ensuredStateSessionRef = useRef<string | null>(null);
 
   const handleSystemPromptChange = useCallback((prompt: string | null) => {
     setSystemPrompt(prompt);
@@ -210,9 +223,32 @@ export function AppShell() {
     setContextUsage(usage);
   }, []);
 
+  const [currentModelInfo, setCurrentModelInfo] = useState<CurrentModelInfo | null>(null);
+  const handleModelInfoChange = useCallback((model: CurrentModelInfo | null) => {
+    setCurrentModelInfo(model);
+  }, []);
+
   // Single active panel — only one dropdown open at a time
   const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [topBarTooltip, setTopBarTooltip] = useState<TopBarTooltip | null>(null);
+
+  const showTopBarTooltip = useCallback((text: string, element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - 18, Math.max(18, rect.left + rect.width / 2));
+    setTopBarTooltip({ text, x, y: rect.bottom + 8 });
+  }, []);
+
+  const hideTopBarTooltip = useCallback(() => {
+    setTopBarTooltip(null);
+  }, []);
+
+  const topBarTooltipProps = useCallback((text: string) => ({
+    onMouseEnter: (event: MouseEvent<HTMLElement>) => showTopBarTooltip(text, event.currentTarget),
+    onMouseLeave: hideTopBarTooltip,
+    onFocus: (event: FocusEvent<HTMLElement>) => showTopBarTooltip(text, event.currentTarget),
+    onBlur: hideTopBarTooltip,
+  }), [showTopBarTooltip, hideTopBarTooltip]);
 
   useEffect(() => {
     const unsubscribe = window.piDesktop?.onOpenSettings?.(() => setSettingsConfigOpen(true));
@@ -263,9 +299,64 @@ export function AppShell() {
     };
   }, [t]);
 
+  const fetchEnsuredAgentState = useCallback(async () => {
+    if (!selectedSession) return null;
+    const res = await fetch(`/api/agent/${encodeURIComponent(selectedSession.id)}?ensureState=1`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json() as {
+      running?: boolean;
+      state?: {
+        contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null;
+        systemPrompt?: string;
+      };
+    };
+    return data.state ?? null;
+  }, [selectedSession]);
+
+  const ensureSystemPrompt = useCallback(async () => {
+    if (!selectedSession || systemPrompt !== null || systemPromptLoading) return;
+    setSystemPromptError(null);
+    setSystemPromptLoading(true);
+    try {
+      const state = await fetchEnsuredAgentState();
+      if (state?.contextUsage !== undefined) setContextUsage(state.contextUsage ?? null);
+      if (state?.systemPrompt !== undefined) {
+        setSystemPrompt(state.systemPrompt);
+      } else {
+        setSystemPromptError(t("app.systemPromptUnavailable"));
+      }
+    } catch (error) {
+      setSystemPromptError(String(error));
+    } finally {
+      setSystemPromptLoading(false);
+    }
+  }, [fetchEnsuredAgentState, selectedSession, systemPrompt, systemPromptLoading, t]);
+
+  useEffect(() => {
+    if (!coreReady || !selectedSession || ensuredStateSessionRef.current === selectedSession.id) return;
+    ensuredStateSessionRef.current = selectedSession.id;
+    let cancelled = false;
+    fetchEnsuredAgentState()
+      .then((state) => {
+        if (cancelled || !state) return;
+        if (state.contextUsage !== undefined) setContextUsage(state.contextUsage ?? null);
+        if (state.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt);
+      })
+      .catch(() => {
+        if (!cancelled) ensuredStateSessionRef.current = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [coreReady, fetchEnsuredAgentState, selectedSession]);
+
   const toggleTopPanel = useCallback((panel: "branches" | "system") => {
-    setActiveTopPanel((cur) => cur === panel ? null : panel);
-  }, []);
+    setActiveTopPanel((cur) => {
+      const next = cur === panel ? null : panel;
+      if (next === "system") void ensureSystemPrompt();
+      return next;
+    });
+  }, [ensureSystemPrompt]);
 
   useEffect(() => {
     if (!activeTopPanel || !topBarRef.current) return;
@@ -313,6 +404,12 @@ export function AppShell() {
     setBranchTree([]);
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
+    setSystemPromptError(null);
+    setSystemPromptLoading(false);
+    ensuredStateSessionRef.current = null;
+    setSessionStats(null);
+    setContextUsage(null);
+    setCurrentModelInfo(null);
     setActiveTopPanel(null);
     router.replace("/", { scroll: false });
   }, [router]);
@@ -322,6 +419,12 @@ export function AppShell() {
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
+    setSystemPromptError(null);
+    setSystemPromptLoading(false);
+    ensuredStateSessionRef.current = null;
+    setSessionStats(null);
+    setContextUsage(null);
+    setCurrentModelInfo(null);
     setInitialSessionRestored(true);
     if (isRestore) {
       // Suppress the redundant sessionKey bump that would come from the
@@ -343,6 +446,12 @@ export function AppShell() {
     setBranchTree([]);
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
+    setSystemPromptError(null);
+    setSystemPromptLoading(false);
+    ensuredStateSessionRef.current = null;
+    setSessionStats(null);
+    setContextUsage(null);
+    setCurrentModelInfo(null);
     setActiveTopPanel(null);
     router.replace("/", { scroll: false });
   }, [router]);
@@ -351,6 +460,13 @@ export function AppShell() {
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
+    setSystemPrompt(null);
+    setSystemPromptError(null);
+    setSystemPromptLoading(false);
+    ensuredStateSessionRef.current = null;
+    setSessionStats(null);
+    setContextUsage(null);
+    setCurrentModelInfo(null);
     setRefreshKey((k) => k + 1);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
   }, [router]);
@@ -364,6 +480,13 @@ export function AppShell() {
     setRefreshKey((k) => k + 1);
     setSessionKey((k) => k + 1);
     setNewSessionCwd(null);
+    setSystemPrompt(null);
+    setSystemPromptError(null);
+    setSystemPromptLoading(false);
+    ensuredStateSessionRef.current = null;
+    setSessionStats(null);
+    setContextUsage(null);
+    setCurrentModelInfo(null);
     setSelectedSession((prev) => ({
       ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
       id: newSessionId,
@@ -385,6 +508,12 @@ export function AppShell() {
       setBranchTree([]);
       setBranchActiveLeafId(null);
       setSystemPrompt(null);
+      setSystemPromptError(null);
+      setSystemPromptLoading(false);
+      ensuredStateSessionRef.current = null;
+      setSessionStats(null);
+      setContextUsage(null);
+      setCurrentModelInfo(null);
       setActiveTopPanel(null);
       router.replace("/", { scroll: false });
     }
@@ -582,7 +711,7 @@ export function AppShell() {
             <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
               <button
                 onClick={handleExportSession}
-                disabled={!selectedSession}
+                aria-disabled={!selectedSession}
                 title={selectedSession ? t("app.exportHtml") : t("app.exportUnavailable")}
                 aria-label={t("app.exportHtml")}
                 style={{
@@ -604,14 +733,18 @@ export function AppShell() {
                   transition: "color 0.1s, background 0.1s, opacity 0.1s",
                 }}
                 onMouseEnter={(e) => {
+                  showTopBarTooltip(selectedSession ? t("app.exportHtml") : t("app.exportUnavailable"), e.currentTarget);
                   if (!selectedSession) return;
                   e.currentTarget.style.color = "var(--text)";
                   e.currentTarget.style.background = "var(--bg-hover)";
                 }}
                 onMouseLeave={(e) => {
+                  hideTopBarTooltip();
                   e.currentTarget.style.color = selectedSession ? "var(--text-muted)" : "var(--text-dim)";
                   e.currentTarget.style.background = "none";
                 }}
+                onFocus={(e) => showTopBarTooltip(selectedSession ? t("app.exportHtml") : t("app.exportUnavailable"), e.currentTarget)}
+                onBlur={hideTopBarTooltip}
               >
                 <span style={{
                   display: "flex",
@@ -645,6 +778,8 @@ export function AppShell() {
               <button
                 ref={systemBtnRef}
                 onClick={() => toggleTopPanel("system")}
+                title={t("app.systemPromptTooltip")}
+                aria-label={t("app.systemPromptTooltip")}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   height: "100%", padding: "0 12px",
@@ -656,8 +791,10 @@ export function AppShell() {
                   color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
                   fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)"; }}
+                onMouseEnter={(e) => { showTopBarTooltip(t("app.systemPromptTooltip"), e.currentTarget); e.currentTarget.style.color = "var(--text)"; }}
+                onMouseLeave={(e) => { hideTopBarTooltip(); e.currentTarget.style.color = activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)"; }}
+                onFocus={(e) => showTopBarTooltip(t("app.systemPromptTooltip"), e.currentTarget)}
+                onBlur={hideTopBarTooltip}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }}>
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -670,38 +807,45 @@ export function AppShell() {
             </div>
           )}
           {/* Session stats — right-aligned in top bar */}
-          {coreReady && showChat && (sessionStats || contextUsage) && (() => {
-            const t = sessionStats?.tokens;
+          {coreReady && showChat && (() => {
+            const tokens = sessionStats?.tokens;
             const c = sessionStats?.cost ?? 0;
             const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
             const costStr = c > 0 ? (c >= 0.01 ? `$${c.toFixed(2)}` : `<$0.01`) : null;
+            const metricColor = (available: boolean) => available ? "var(--text-muted)" : "var(--text-dim)";
+            const metricText = (value: number | undefined) => value && value > 0 ? fmt(value) : "--";
 
             let ctxColor = "var(--text-muted)";
-            let ctxStr: string | null = null;
+            let ctxStr = "-- / --";
+            const fallbackContextWindow = currentModelInfo?.contextWindow;
+            const contextWindow = contextUsage?.contextWindow ?? fallbackContextWindow;
             if (contextUsage?.contextWindow) {
               const pct = contextUsage.percent;
-              if (pct !== null && pct > 90) ctxColor = "#ef4444";
-              else if (pct !== null && pct > 70) ctxColor = "rgba(234,179,8,0.95)";
-              ctxStr = pct !== null ? `${pct.toFixed(0)}% / ${fmt(contextUsage.contextWindow)}` : `? / ${fmt(contextUsage.contextWindow)}`;
+              if (typeof pct === "number" && pct > 90) ctxColor = "#ef4444";
+              else if (typeof pct === "number" && pct > 70) ctxColor = "rgba(234,179,8,0.95)";
+              ctxStr = typeof pct === "number" ? `${pct.toFixed(0)}% / ${fmt(contextUsage.contextWindow)}` : `? / ${fmt(contextUsage.contextWindow)}`;
+            } else if (fallbackContextWindow) {
+              ctxColor = "var(--text-dim)";
+              ctxStr = selectedSession ? `-- / ${fmt(fallbackContextWindow)}` : `0% / ${fmt(fallbackContextWindow)}`;
+            } else {
+              ctxColor = "var(--text-dim)";
             }
 
-            const tooltipParts: string[] = [];
-            if (t) {
-              tooltipParts.push(`in: ${t.input.toLocaleString()}`);
-              tooltipParts.push(`out: ${t.output.toLocaleString()}`);
-              tooltipParts.push(`cache read: ${t.cacheRead.toLocaleString()}`);
-              tooltipParts.push(`cache write: ${t.cacheWrite.toLocaleString()}`);
-              if (c > 0) tooltipParts.push(`cost: $${c.toFixed(4)}`);
-            }
-            if (contextUsage?.contextWindow) {
-              const pct = contextUsage.percent;
-              tooltipParts.push(`context: ${pct !== null ? pct.toFixed(1) + "%" : "unknown"} of ${contextUsage.contextWindow.toLocaleString()} tokens`);
-            }
-            const tooltip = tooltipParts.join("  |  ");
+            const contextTitle = contextUsage?.contextWindow
+              ? t("app.stats.contextTooltip", {
+                  percent: typeof contextUsage.percent === "number" ? `${contextUsage.percent.toFixed(1)}%` : t("app.stats.unknown"),
+                  used: typeof contextUsage.tokens === "number" ? contextUsage.tokens.toLocaleString() : t("app.stats.unknown"),
+                  window: contextUsage.contextWindow.toLocaleString(),
+                })
+              : contextWindow
+                ? selectedSession
+                  ? t("app.stats.contextPendingTooltip", { window: contextWindow.toLocaleString() })
+                  : t("app.stats.contextTooltip", { percent: "0.0%", used: "0", window: contextWindow.toLocaleString() })
+                : t("app.stats.contextMissingTooltip");
 
             return (
               <div
-                title={tooltip}
+                className="no-window-drag"
                 style={{
                   marginLeft: "auto",
                   display: "flex", alignItems: "center", gap: 10,
@@ -713,43 +857,33 @@ export function AppShell() {
                   fontVariantNumeric: "tabular-nums",
                 }}
               >
-                {t && t.input > 0 && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span {...topBarTooltipProps(tokens ? t("app.stats.inputTooltip", { count: tokens.input.toLocaleString() }) : t("app.stats.inputPendingTooltip"))} style={{ display: "flex", alignItems: "center", gap: 4, color: metricColor(Boolean(tokens)) }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
                     </svg>
-                    {fmt(t.input)}
+                    {metricText(tokens?.input)}
                   </span>
-                )}
-                {t && t.output > 0 && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span {...topBarTooltipProps(tokens ? t("app.stats.outputTooltip", { count: tokens.output.toLocaleString() }) : t("app.stats.outputPendingTooltip"))} style={{ display: "flex", alignItems: "center", gap: 4, color: metricColor(Boolean(tokens)) }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
                     </svg>
-                    {fmt(t.output)}
+                    {metricText(tokens?.output)}
                   </span>
-                )}
-                {t && t.cacheRead > 0 && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span {...topBarTooltipProps(tokens ? t("app.stats.cacheReadTooltip", { count: tokens.cacheRead.toLocaleString() }) : t("app.stats.cacheReadPendingTooltip"))} style={{ display: "flex", alignItems: "center", gap: 4, color: metricColor(Boolean(tokens)) }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M8.5 5a3.5 3.5 0 1 1-1-2.45" /><polyline points="6.5 1.5 8.5 2.5 7.5 4.5" />
                     </svg>
-                    {fmt(t.cacheRead)}
+                    {metricText(tokens?.cacheRead)}
                   </span>
-                )}
-                {costStr && (
-                  <span style={{ display: "flex", alignItems: "center", color: "var(--text)", fontWeight: 500 }}>
-                    {costStr}
+                <span {...topBarTooltipProps(c > 0 ? t("app.stats.costTooltip", { cost: `$${c.toFixed(4)}` }) : t("app.stats.costPendingTooltip"))} style={{ display: "flex", alignItems: "center", color: costStr ? "var(--text)" : "var(--text-dim)", fontWeight: 500 }}>
+                    {costStr ?? "$--"}
                   </span>
-                )}
-                {ctxStr && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4, color: ctxColor }}>
+                <span {...topBarTooltipProps(contextTitle)} style={{ display: "flex", alignItems: "center", gap: 4, color: ctxColor }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M1 9 L1 5 Q1 1 5 1 Q9 1 9 5 L9 9" /><line x1="1" y1="9" x2="9" y2="9" />
                     </svg>
                     {ctxStr}
                   </span>
-                )}
               </div>
             );
           })()}
@@ -767,7 +901,15 @@ export function AppShell() {
                   background: "var(--bg-panel)",
                   borderBottom: "1px solid var(--border)",
                 }}>
-                  {systemPrompt ? (
+                  {systemPromptLoading ? (
+                    <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                      {t("app.systemPromptLoading")}
+                    </div>
+                  ) : systemPromptError ? (
+                    <div style={{ padding: "10px 16px", fontSize: 12, color: "#ef4444", fontStyle: "italic" }}>
+                      {t("app.systemPromptError", { error: systemPromptError })}
+                    </div>
+                  ) : systemPrompt ? (
                     <div style={{
                       maxHeight: "min(600px, 75vh)",
                       overflowY: "auto",
@@ -786,7 +928,7 @@ export function AppShell() {
                     </div>
                   ) : (
                     <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-                      {t("app.systemPromptLoad")}
+                      {selectedSession ? t("app.systemPromptLoad") : t("app.systemPromptNoSession")}
                     </div>
                   )}
                 </div>
@@ -816,6 +958,7 @@ export function AppShell() {
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
               onContextUsageChange={handleContextUsageChange}
+              onModelInfoChange={handleModelInfoChange}
             />
           ) : showPlaceholder ? (
             activeCwd ? (
@@ -887,14 +1030,48 @@ export function AppShell() {
         background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
         color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
         cursor: "pointer", transition: "color 0.12s",
+        WebkitAppRegion: "no-drag",
+      } as ElectronDragStyle}
+      onMouseEnter={(e) => {
+        showTopBarTooltip(rightPanelOpen ? t("app.hideFilePanel") : t("app.showFilePanel"), e.currentTarget);
+        e.currentTarget.style.color = "var(--text)";
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)"; }}
+      onMouseLeave={(e) => {
+        hideTopBarTooltip();
+        e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)";
+      }}
+      onFocus={(e) => showTopBarTooltip(rightPanelOpen ? t("app.hideFilePanel") : t("app.showFilePanel"), e.currentTarget)}
+      onBlur={hideTopBarTooltip}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
       </svg>
     </button>
+    {topBarTooltip && (
+      <div
+        role="tooltip"
+        style={{
+          position: "fixed",
+          left: topBarTooltip.x,
+          top: topBarTooltip.y,
+          transform: "translateX(-50%)",
+          zIndex: 1200,
+          maxWidth: 320,
+          padding: "6px 8px",
+          borderRadius: 6,
+          border: "1px solid var(--border)",
+          background: "var(--bg-panel)",
+          color: "var(--text)",
+          boxShadow: "0 10px 28px rgba(0,0,0,0.24)",
+          fontSize: 11,
+          lineHeight: 1.45,
+          pointerEvents: "none",
+          whiteSpace: "normal",
+        }}
+      >
+        {topBarTooltip.text}
+      </div>
+    )}
     {coreReady && modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {coreReady && skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
       <SkillsConfig cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!} onClose={() => setSkillsConfigOpen(false)} />

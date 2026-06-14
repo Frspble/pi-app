@@ -94,7 +94,11 @@ export class AgentSessionWrapper {
           isCompacting: this.inner.isCompacting,
           autoCompactionEnabled: this.inner.autoCompactionEnabled,
           autoRetryEnabled: this.inner.autoRetryEnabled,
-          model: model ? { id: model.id, provider: model.provider } : undefined,
+          model: model ? {
+            id: model.id,
+            provider: model.provider,
+            ...(typeof model.contextWindow === "number" ? { contextWindow: model.contextWindow } : {}),
+          } : undefined,
           messageCount: 0,
           pendingMessageCount: 0,
           contextUsage: contextUsage

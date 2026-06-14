@@ -53,8 +53,21 @@ export async function GET(
     const proxied = await proxyToCoreService(req);
     if (proxied) return proxied;
 
-    const { getRpcSession } = await import("@/lib/rpc-manager");
-    const session = getRpcSession(id);
+    const url = new URL(req.url);
+    const [{ getRpcSession, startRpcSession }, { resolveSessionPath }, { SessionManager }] = await Promise.all([
+      import("@/lib/rpc-manager"),
+      import("@/lib/session-reader"),
+      import("@earendil-works/pi-coding-agent"),
+    ]);
+    let session = getRpcSession(id);
+    if ((!session || !session.isAlive()) && url.searchParams.has("ensureState")) {
+      const filePath = await resolveSessionPath(id);
+      if (!filePath) {
+        return NextResponse.json({ error: "Session not found" }, { status: 404 });
+      }
+      const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
+      ({ session } = await startRpcSession(id, filePath, cwd));
+    }
     if (!session || !session.isAlive()) {
       return NextResponse.json({ running: false });
     }
