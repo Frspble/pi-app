@@ -469,6 +469,17 @@ function getNodeCommand() {
   return findCommand("node") || "node";
 }
 
+function getAppNodeCommand() {
+  return process.env.PI_APP_NODE || process.execPath;
+}
+
+function withAppNodeEnv(env = process.env) {
+  return withDesktopPath({
+    ...env,
+    ELECTRON_RUN_AS_NODE: "1",
+  });
+}
+
 function getArgValue(name) {
   const prefix = `${name}=`;
   const inline = process.argv.find((arg) => arg.startsWith(prefix));
@@ -1345,7 +1356,7 @@ function startCoreService(info = runtimeInfo) {
 async function doStartCoreService(info = runtimeInfo) {
   const runtimeDir = info?.runtimeDir || getRuntimeDir();
   const token = crypto.randomBytes(32).toString("hex");
-  const command = getNodeCommand();
+  const command = getAppNodeCommand();
   const script = getCoreServiceScript();
 
   emitCoreSetupState({
@@ -1363,7 +1374,7 @@ async function doStartCoreService(info = runtimeInfo) {
     let output = "";
     const child = spawn(command, [script], {
       cwd: getAppRoot(),
-      env: withDesktopPath({
+      env: withAppNodeEnv({
         ...process.env,
         FORCE_COLOR: "0",
         PI_CORE_RUNTIME_DIR: runtimeDir,
@@ -1621,8 +1632,6 @@ async function doStartNextServer() {
     return serverUrl;
   }
 
-  await ensureNodeAvailable();
-
   const appRoot = getAppRoot();
   const devMode = process.argv.includes("--dev-next") || process.env.PI_WEB_ELECTRON_DEV === "1";
   const nextDir = path.join(appRoot, ".next");
@@ -1640,12 +1649,12 @@ async function doStartNextServer() {
   const standaloneServer = devMode
     ? packagedStandaloneServer
     : await syncRuntimeStandalone(appRoot, runtimeInfo.runtimeDir);
-  const command = getNodeCommand();
+  const command = getAppNodeCommand();
   const mode = devMode ? "dev" : "standalone";
   const args = devMode
     ? [resolveNextBin(appRoot), "dev", "-p", String(port), "-H", "127.0.0.1"]
     : [standaloneServer];
-  const env = withDesktopPath({
+  const env = withAppNodeEnv({
     ...process.env,
     HOSTNAME: "127.0.0.1",
     NODE_PATH: buildNodePath(),
@@ -2191,7 +2200,7 @@ async function boot() {
       detail: "",
       runtimeDir: runtimeInfo.runtimeDir,
     });
-    log(`${PRODUCT_NAME} booting`, `userData=${app.getPath("userData")}\nnode=${getNodeCommand()}\nnpm=${getNpmCommand()}\nPATH=${withDesktopPath().PATH}`);
+    log(`${PRODUCT_NAME} booting`, `userData=${app.getPath("userData")}\nappNode=${getAppNodeCommand()}\nsystemNode=${getNodeCommand()}\nnpm=${getNpmCommand()}\nPATH=${withDesktopPath().PATH}`);
     createMenu();
     createMainWindow();
     loadMainAppWhenReady().catch((error) => {
