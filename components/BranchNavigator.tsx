@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect, type FocusEvent, type MouseEvent } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionEntry, SessionTreeNode } from "@/lib/types";
 
@@ -218,6 +218,17 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
   const open = openProp !== undefined ? openProp : openInternal;
   const btnRef = useRef<HTMLButtonElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+
+  const showTooltip = useCallback((element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - 18, Math.max(18, rect.left + rect.width / 2));
+    setTooltipPos({ x, y: rect.bottom + 8 });
+  }, []);
+
+  const hideTooltip = useCallback(() => {
+    setTooltipPos(null);
+  }, []);
 
   useEffect(() => {
     if (!open || !inline) return;
@@ -275,6 +286,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
         <button
           ref={btnRef}
           onClick={() => onToggle ? onToggle() : setOpenInternal((v) => !v)}
+          aria-label={t("branches.tooltip")}
           style={{
             display: "flex",
             alignItems: "center",
@@ -291,12 +303,38 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
             whiteSpace: "nowrap",
             transition: "color 0.1s, background 0.1s",
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
+          onMouseEnter={(e: MouseEvent<HTMLButtonElement>) => { showTooltip(e.currentTarget); e.currentTarget.style.color = "var(--text)"; }}
+          onMouseLeave={(e: MouseEvent<HTMLButtonElement>) => { hideTooltip(); e.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
+          onFocus={(e: FocusEvent<HTMLButtonElement>) => showTooltip(e.currentTarget)}
+          onBlur={hideTooltip}
         >
           {branchIcon}
           <span>{t("branches.title")}</span>
         </button>
+        {tooltipPos && (
+          <div
+            role="tooltip"
+            style={{
+              position: "fixed",
+              left: tooltipPos.x,
+              top: tooltipPos.y,
+              transform: "translateX(-50%)",
+              zIndex: 1200,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid var(--border)",
+              background: "var(--bg-panel)",
+              color: "var(--text)",
+              boxShadow: "0 10px 28px rgba(0,0,0,0.24)",
+              fontSize: 11,
+              lineHeight: 1.45,
+              pointerEvents: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {t("branches.tooltip")}
+          </div>
+        )}
         {open && dropdownPos && (
           <div style={{
             position: "fixed",

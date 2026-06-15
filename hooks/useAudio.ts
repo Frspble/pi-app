@@ -3,19 +3,28 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
 export function useAudio() {
-  const [enabled, setEnabled] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    const stored = localStorage.getItem("pi-sound-enabled");
-    return stored === null ? true : stored === "true";
-  });
+  const [enabled, setEnabled] = useState(true);
 
   const enabledRef = useRef(enabled);
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
 
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("pi-sound-enabled");
+      if (stored !== null) setEnabled(stored === "true");
+    } catch {
+      // Storage may be unavailable. Keep the default enabled state.
+    }
+  }, []);
+
   const toggle = useCallback(() => {
     setEnabled((prev) => {
       const next = !prev;
-      localStorage.setItem("pi-sound-enabled", String(next));
+      try {
+        localStorage.setItem("pi-sound-enabled", String(next));
+      } catch {
+        // The in-memory toggle still works without storage.
+      }
       return next;
     });
   }, []);

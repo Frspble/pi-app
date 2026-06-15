@@ -1022,7 +1022,7 @@ export function AppShell() {
     <button
       className="file-panel-toggle no-window-drag"
       onClick={() => setRightPanelOpen((v) => !v)}
-      title={rightPanelOpen ? t("app.hideFilePanel") : t("app.showFilePanel")}
+      aria-label={rightPanelOpen ? t("app.hideFilePanel") : t("app.showFilePanel")}
       style={{
         position: "fixed", top: 0, right: 0, zIndex: 300,
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -1033,15 +1033,11 @@ export function AppShell() {
         WebkitAppRegion: "no-drag",
       } as ElectronDragStyle}
       onMouseEnter={(e) => {
-        showTopBarTooltip(rightPanelOpen ? t("app.hideFilePanel") : t("app.showFilePanel"), e.currentTarget);
         e.currentTarget.style.color = "var(--text)";
       }}
       onMouseLeave={(e) => {
-        hideTopBarTooltip();
         e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)";
       }}
-      onFocus={(e) => showTopBarTooltip(rightPanelOpen ? t("app.hideFilePanel") : t("app.showFilePanel"), e.currentTarget)}
-      onBlur={hideTopBarTooltip}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
