@@ -470,7 +470,26 @@ function getNodeCommand() {
 }
 
 function getAppNodeCommand() {
-  return process.env.PI_APP_NODE || process.execPath;
+  if (process.env.PI_APP_NODE) return process.env.PI_APP_NODE;
+  return getPackagedMacHelperCommand() || process.execPath;
+}
+
+function getPackagedMacHelperCommand() {
+  if (process.platform !== "darwin" || !app.isPackaged) return null;
+
+  const mainExecutable = path.basename(process.execPath);
+  const contentsDir = path.dirname(path.dirname(process.execPath));
+  const helperExecutable = `${mainExecutable} Helper`;
+  const helperPath = path.join(
+    contentsDir,
+    "Frameworks",
+    `${helperExecutable}.app`,
+    "Contents",
+    "MacOS",
+    helperExecutable,
+  );
+
+  return isRunnable(helperPath) ? helperPath : null;
 }
 
 function withAppNodeEnv(env = process.env) {
