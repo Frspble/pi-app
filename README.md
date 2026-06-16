@@ -94,7 +94,6 @@ PORT=8080 pi-web
 - **会话目录**：默认读取 `~/.pi/agent/sessions`，可通过 `PI_CODING_AGENT_DIR` 指定。
 - **模型配置**：读取 Pi Agent 数据目录下的 `models.json`，可在 Pi App 的 Models 面板中编辑。
 - **桌面 runtime**：Pi Core 安装在 App 用户数据目录下的 `PiApp/runtime`。
-- **Release 版本**：当前版本 `0.6.19`。
 
 ## 项目结构
 
@@ -115,10 +114,4 @@ lib/
   rpc-manager.ts     # 浏览器 dev fallback 的 AgentSession 生命周期
   normalize.ts       # 规范化 toolCall 字段名
   types.ts
-```
-
-会话文件路径：
-
-```text
-~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl
 ```

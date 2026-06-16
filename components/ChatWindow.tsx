@@ -121,6 +121,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange,
   });
+  const messageBasePath = session?.cwd ?? newSessionCwd ?? undefined;
 
   const { soundEnabled, onSoundToggle, playDoneSound } = useAudio();
   const playDoneSoundRef = useRef(playDoneSound);
@@ -372,6 +373,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     onEditContent={(content) => chatInputRef?.current?.insertIfEmpty(content)}
                     showTimestamp={showTimestamp}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as import("@/lib/types").AgentMessage & { timestamp?: number }).timestamp : undefined}
+                    cwd={messageBasePath}
                   />
                 );
                 if (!isVisible) return view;
@@ -387,7 +389,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             })()}
 
             {streamState.isStreaming && streamState.streamingMessage && (
-              <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} />
+              <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} cwd={messageBasePath} />
             )}
 
             {agentRunning && !streamState.streamingMessage && (

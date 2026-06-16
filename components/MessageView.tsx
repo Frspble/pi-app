@@ -28,6 +28,7 @@ interface Props {
   onEditContent?: (content: string) => void;
   showTimestamp?: boolean;
   prevTimestamp?: number;
+  cwd?: string;
 }
 
 function formatTime(ts?: number): string | null {
@@ -62,12 +63,12 @@ function copyText(text: string): Promise<void> {
   }
 }
 
-export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp }: Props) {
+export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, cwd }: Props) {
   if (message.role === "user") {
-    return <UserMessageView message={message as UserMessage} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} />;
+    return <UserMessageView message={message as UserMessage} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} cwd={cwd} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} cwd={cwd} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -76,7 +77,7 @@ export function MessageView({ message, isStreaming, toolResults, modelNames, ent
   return null;
 }
 
-function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent }: {
+function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, cwd }: {
   message: UserMessage;
   entryId?: string;
   onFork?: (entryId: string) => void;
@@ -84,6 +85,7 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
   onNavigate?: (entryId: string) => void;
   prevAssistantEntryId?: string;
   onEditContent?: (content: string) => void;
+  cwd?: string;
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
@@ -159,7 +161,7 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
               })}
             </div>
           )}
-          {content && <MarkdownBody className="markdown-user-message">{content}</MarkdownBody>}
+          {content && <MarkdownBody className="markdown-user-message" basePath={cwd}>{content}</MarkdownBody>}
         </div>
 
       </div>
@@ -282,6 +284,7 @@ function AssistantMessageView({
   modelNames,
   showTimestamp,
   prevTimestamp,
+  cwd,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -289,6 +292,7 @@ function AssistantMessageView({
   modelNames?: Record<string, string>;
   showTimestamp?: boolean;
   prevTimestamp?: number;
+  cwd?: string;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -449,7 +453,7 @@ function AssistantMessageView({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blocks.map((block, i) => (
-          <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} />
+          <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} />
         ))}
       </div>
 
@@ -502,9 +506,9 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number> }) {
+function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string }) {
   if (block.type === "text") {
-    return <TextBlock block={block as TextContent} isStreaming={isStreaming} />;
+    return <TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} />;
   }
   if (block.type === "thinking") {
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} />;
@@ -518,8 +522,8 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
   return null;
 }
 
-function TextBlock({ block, isStreaming }: { block: TextContent; isStreaming?: boolean }) {
-  return <MarkdownBody isStreaming={isStreaming}>{block.text}</MarkdownBody>;
+function TextBlock({ block, isStreaming, cwd }: { block: TextContent; isStreaming?: boolean; cwd?: string }) {
+  return <MarkdownBody isStreaming={isStreaming} basePath={cwd}>{block.text}</MarkdownBody>;
 }
 
 function ThinkingBlock({ block, duration }: { block: ThinkingContent; duration?: number }) {

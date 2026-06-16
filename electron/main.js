@@ -2052,8 +2052,13 @@ function createMainWindow() {
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-    shell.openExternal(targetUrl);
+    openExternalUrl(targetUrl);
     return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, targetUrl) => {
+    if (isInternalAppUrl(targetUrl)) return;
+    event.preventDefault();
+    openExternalUrl(targetUrl);
   });
   mainWindow.webContents.on("did-finish-load", () => {
     sendCoreSetupStateToWindow(mainWindow);
@@ -2062,6 +2067,26 @@ function createMainWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+}
+
+function isInternalAppUrl(targetUrl) {
+  if (!targetUrl || targetUrl.startsWith("data:text/html")) return true;
+  if (!serverUrl) return false;
+  try {
+    return new URL(targetUrl).origin === new URL(serverUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+function openExternalUrl(targetUrl) {
+  try {
+    const parsed = new URL(targetUrl);
+    if (!["http:", "https:", "mailto:"].includes(parsed.protocol)) return;
+    shell.openExternal(targetUrl);
+  } catch {
+    // Ignore malformed or unsupported URLs instead of navigating away from the app.
+  }
 }
 
 function openSettingsFromMenu() {

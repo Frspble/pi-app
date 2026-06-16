@@ -9,11 +9,13 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { useTheme } from "@/hooks/useTheme";
+import { encodeFilePathForApi, joinFilePath, normalizeFilePathSlashes } from "@/lib/file-paths";
 
 interface MarkdownBodyProps {
   children: string;
   className?: string;
   isStreaming?: boolean;
+  basePath?: string;
 }
 
 function copyText(text: string): Promise<void> {
@@ -35,7 +37,7 @@ function copyText(text: string): Promise<void> {
   }
 }
 
-export function MarkdownBody({ children, className, isStreaming }: MarkdownBodyProps) {
+export function MarkdownBody({ children, className, isStreaming, basePath }: MarkdownBodyProps) {
   const normalizedMarkdown = useMemo(() => normalizeDisplayMath(children), [children]);
 
   return (
@@ -72,12 +74,84 @@ export function MarkdownBody({ children, className, isStreaming }: MarkdownBodyP
           pre({ children }) {
             return <>{children}</>;
           },
+          a({ href, children, ...props }) {
+            const isExternal = typeof href === "string" && /^(?:https?|mailto):/i.test(href);
+            return (
+              <a
+                href={href}
+                target={isExternal ? "_blank" : undefined}
+                rel={isExternal ? "noopener noreferrer" : undefined}
+                {...props}
+              >
+                {children}
+              </a>
+            );
+          },
+          img({ src, alt, title }) {
+            const resolvedSrc = typeof src === "string" ? resolveMarkdownImageSrc(src, basePath) : src;
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={resolvedSrc}
+                alt={alt ?? ""}
+                title={title}
+                loading="lazy"
+                style={{
+                  display: "block",
+                  maxWidth: "100%",
+                  maxHeight: 420,
+                  width: "auto",
+                  height: "auto",
+                  objectFit: "contain",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  background: "var(--bg-panel)",
+                }}
+              />
+            );
+          },
         }}
       >
         {normalizedMarkdown}
       </ReactMarkdown>
     </div>
   );
+}
+
+function resolveMarkdownImageSrc(src: string | undefined, basePath?: string): string | undefined {
+  if (!src) return src;
+  const trimmed = src.trim();
+  if (!trimmed) return src;
+  if (isExternalOrAppSrc(trimmed)) return trimmed;
+
+  const filePath = isAbsoluteFilePath(trimmed)
+    ? trimmed
+    : basePath
+      ? joinFilePath(basePath, trimmed)
+      : null;
+
+  if (!filePath) return trimmed;
+  return `/api/files/${encodeFilePathForApi(safeDecodePath(filePath))}?type=read`;
+}
+
+function isExternalOrAppSrc(src: string): boolean {
+  if (/^(?:https?|data|blob|mailto):/i.test(src)) return true;
+  if (src.startsWith("//")) return true;
+  if (src.startsWith("/api/") || src.startsWith("/_next/")) return true;
+  return false;
+}
+
+function isAbsoluteFilePath(src: string): boolean {
+  const normalized = normalizeFilePathSlashes(src);
+  return normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized);
+}
+
+function safeDecodePath(filePath: string): string {
+  try {
+    return decodeURIComponent(filePath);
+  } catch {
+    return filePath;
+  }
 }
 
 function normalizeDisplayMath(markdown: string): string {
