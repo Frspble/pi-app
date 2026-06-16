@@ -86,6 +86,22 @@ html, body {
 
 body {
   height: 100dvh;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable="true"],
+.markdown-body,
+.markdown-body *,
+pre,
+pre *,
+code,
+code * {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 ::-webkit-scrollbar {

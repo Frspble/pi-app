@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("piDesktop", {
   getCoreStatus: () => ipcRenderer.invoke("piDesktop:getCoreStatus"),
   checkCoreUpdates: () => ipcRenderer.invoke("piDesktop:checkCoreUpdates"),
   updateCore: () => ipcRenderer.invoke("piDesktop:updateCore"),
+  checkAppUpdates: () => ipcRenderer.invoke("piDesktop:checkAppUpdates"),
+  openAppDownloadPage: (url) => ipcRenderer.invoke("piDesktop:openAppDownloadPage", url),
   openRuntimeFolder: () => ipcRenderer.invoke("piDesktop:openRuntimeFolder"),
   openLogFile: () => ipcRenderer.invoke("piDesktop:openLogFile"),
   selectDirectory: () => ipcRenderer.invoke("piDesktop:selectDirectory"),

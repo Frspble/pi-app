@@ -5,6 +5,7 @@ const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme } = requir
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
+const https = require("https");
 const http = require("http");
 const net = require("net");
 const path = require("path");
@@ -12,6 +13,8 @@ const path = require("path");
 const PRODUCT_NAME = "Pi App";
 const GITHUB_URL = "https://github.com/Frspble/pi-app";
 const GITHUB_ISSUES_URL = `${GITHUB_URL}/issues`;
+const GITHUB_LATEST_RELEASE_API_URL = "https://api.github.com/repos/Frspble/pi-app/releases/latest";
+const GITHUB_RELEASES_URL = `${GITHUB_URL}/releases`;
 const USER_DATA_DIR_NAME = "PiApp";
 const CORE_PACKAGES = [
   "@earendil-works/pi-coding-agent",
@@ -109,6 +112,8 @@ const DESKTOP_TRANSLATIONS = {
     "dialog.busyError": "An agent session is currently running or compacting. Stop the current run before updating Pi Core.",
     "dialog.chooseProjectFolder": "Choose project folder",
     "dialog.restartFailed": "Restart failed",
+    "dialog.appUpdateCheckFailedTitle": "Pi App update check failed",
+    "dialog.appUpdateCheckFailedMessage": "Could not check GitHub for Pi App updates.",
     "menu.settings": "Settings...",
     "menu.file": "File",
     "menu.edit": "Edit",
@@ -118,6 +123,7 @@ const DESKTOP_TRANSLATIONS = {
     "menu.restartService": "Restart Local Service",
     "menu.openRuntime": "Open Runtime Folder",
     "menu.openLog": "Open Log File",
+    "menu.checkAppUpdates": "Check Pi App Updates...",
     "menu.window": "Window",
     "menu.helpGithub": "Open GitHub Repository",
     "menu.helpIssue": "Report an Issue",
@@ -160,6 +166,8 @@ const DESKTOP_TRANSLATIONS = {
     "dialog.busyError": "当前有 Agent 会话正在运行或压缩。请停止当前运行后再更新 Pi Core。",
     "dialog.chooseProjectFolder": "选择项目文件夹",
     "dialog.restartFailed": "重启失败",
+    "dialog.appUpdateCheckFailedTitle": "Pi App 更新检查失败",
+    "dialog.appUpdateCheckFailedMessage": "无法从 GitHub 检查 Pi App 更新。",
     "menu.settings": "设置...",
     "menu.file": "文件",
     "menu.edit": "编辑",
@@ -169,6 +177,7 @@ const DESKTOP_TRANSLATIONS = {
     "menu.restartService": "重启本地服务",
     "menu.openRuntime": "打开运行时文件夹",
     "menu.openLog": "打开日志文件",
+    "menu.checkAppUpdates": "检查 Pi App 更新...",
     "menu.window": "窗口",
     "menu.helpGithub": "打开 GitHub 仓库",
     "menu.helpIssue": "报告问题",
@@ -681,6 +690,75 @@ function getCoreStatus(remote = null) {
     logPath: getLogPath(),
     nodeModules: getRuntimeNodeModules(runtimeDir),
     packages,
+  };
+}
+
+function normalizeVersion(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^v/i, "")
+    .split(/[+-]/)[0];
+}
+
+function compareVersions(a, b) {
+  const left = normalizeVersion(a).split(".").map((part) => Number.parseInt(part, 10));
+  const right = normalizeVersion(b).split(".").map((part) => Number.parseInt(part, 10));
+  const length = Math.max(left.length, right.length, 3);
+  for (let i = 0; i < length; i++) {
+    const lv = Number.isFinite(left[i]) ? left[i] : 0;
+    const rv = Number.isFinite(right[i]) ? right[i] : 0;
+    if (lv > rv) return 1;
+    if (lv < rv) return -1;
+  }
+  return 0;
+}
+
+function fetchJsonHttps(url, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": `${PRODUCT_NAME}/${app.getVersion()}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      timeout: timeoutMs,
+    }, (res) => {
+      const chunks = [];
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const body = chunks.join("");
+        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error(`GitHub returned ${res.statusCode || "unknown"}: ${body.slice(0, 300)}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error("Timed out checking GitHub releases"));
+    });
+    req.on("error", reject);
+  });
+}
+
+async function checkAppUpdates() {
+  const currentVersion = app.getVersion();
+  const release = await fetchJsonHttps(GITHUB_LATEST_RELEASE_API_URL);
+  const latestVersion = normalizeVersion(release.tag_name || release.name);
+  const releaseUrl = typeof release.html_url === "string" ? release.html_url : GITHUB_RELEASES_URL;
+  const hasUpdate = latestVersion ? compareVersions(latestVersion, currentVersion) > 0 : false;
+  return {
+    currentVersion,
+    latestVersion: latestVersion || null,
+    releaseName: typeof release.name === "string" ? release.name : null,
+    releaseUrl,
+    publishedAt: typeof release.published_at === "string" ? release.published_at : null,
+    hasUpdate,
   };
 }
 
@@ -1989,6 +2067,11 @@ function registerDesktopIpc() {
     await updateCoreRuntime(desktopT("startup.updatingCore"));
     return getCoreStatus(await checkRemoteCoreVersions().catch(() => null));
   });
+  ipcMain.handle("piDesktop:checkAppUpdates", async () => checkAppUpdates());
+  ipcMain.handle("piDesktop:openAppDownloadPage", async (_event, targetUrl) => {
+    openExternalUrl(typeof targetUrl === "string" ? targetUrl : GITHUB_RELEASES_URL);
+    return null;
+  });
   ipcMain.handle("piDesktop:openRuntimeFolder", async () => shell.openPath(getRuntimeDir()));
   ipcMain.handle("piDesktop:openLogFile", async () => {
     log("Opening desktop log");
@@ -2110,6 +2193,10 @@ function createMenu() {
           accelerator: "CmdOrCtrl+,",
           click: openSettingsFromMenu,
         },
+        {
+          label: desktopT("menu.checkAppUpdates"),
+          click: checkAppUpdatesFromMenu,
+        },
         { type: "separator" },
         { role: "services" },
         { type: "separator" },
@@ -2128,6 +2215,10 @@ function createMenu() {
             label: desktopT("menu.settings"),
             accelerator: "Ctrl+,",
             click: openSettingsFromMenu,
+          },
+          {
+            label: desktopT("menu.checkAppUpdates"),
+            click: checkAppUpdatesFromMenu,
           },
           { type: "separator" },
         ] : []),
@@ -2232,6 +2323,34 @@ function createMenu() {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+async function checkAppUpdatesFromMenu() {
+  try {
+    const status = await checkAppUpdates();
+    if (status.hasUpdate) {
+      openExternalUrl(status.releaseUrl);
+      return;
+    }
+    const message = `${PRODUCT_NAME} ${status.currentVersion}`;
+    const detail = status.latestVersion
+      ? `Latest release: ${status.latestVersion}`
+      : "No newer release was found.";
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      await dialog.showMessageBox(mainWindow, { type: "info", title: PRODUCT_NAME, message, detail });
+    } else {
+      dialog.showErrorBox(PRODUCT_NAME, `${message}\n\n${detail}`);
+    }
+  } catch (error) {
+    const title = desktopT("dialog.appUpdateCheckFailedTitle");
+    const message = desktopT("dialog.appUpdateCheckFailedMessage");
+    const detail = error.stack || error.message || String(error);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      await dialog.showMessageBox(mainWindow, { type: "error", title, message, detail });
+    } else {
+      dialog.showErrorBox(title, `${message}\n\n${detail}`);
+    }
+  }
 }
 
 async function boot() {

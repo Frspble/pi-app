@@ -11,6 +11,10 @@ interface Props {
 }
 
 const MINIMAP_WIDTH = 36;
+const TOOLTIP_WIDTH = 200;
+const TOOLTIP_HEIGHT = 22;
+const TOOLTIP_GAP = 2;
+const MAX_VISIBLE_TOOLTIPS = 9;
 
 function getMessagePreview(msg: AgentMessage | Partial<AgentMessage>): string {
   if (msg.role === "user") {
@@ -188,36 +192,7 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
     window.addEventListener("mouseup", onUp);
   }, [visible, viewportRatio, scrollRatio, scrollToMinimapRatio]);
 
-
-
-  // Compute collision-free tooltip positions for all nodes
-  const TOOLTIP_HEIGHT = 22;
-  const TOOLTIP_GAP = 2;
   const minimapHeightPx = containerRef.current?.clientHeight ?? 600;
-
-  const tooltipPositions = useMemo(() => {
-    if (!minimapHovered || nodes.length === 0) return [];
-    // Initial positions: centered on the dot
-    const positions = nodes.map((node) =>
-      Math.round(node.topRatio * minimapHeightPx - TOOLTIP_HEIGHT / 2)
-    );
-    // Iterative push-apart to resolve overlaps (top-to-bottom pass, then bottom-to-top)
-    for (let pass = 0; pass < 10; pass++) {
-      for (let i = 1; i < positions.length; i++) {
-        const minTop = positions[i - 1] + TOOLTIP_HEIGHT + TOOLTIP_GAP;
-        if (positions[i] < minTop) positions[i] = minTop;
-      }
-      for (let i = positions.length - 2; i >= 0; i--) {
-        const maxTop = positions[i + 1] - TOOLTIP_HEIGHT - TOOLTIP_GAP;
-        if (positions[i] > maxTop) positions[i] = maxTop;
-      }
-    }
-    // Clamp all to minimap bounds
-    for (let i = 0; i < positions.length; i++) {
-      positions[i] = Math.max(0, Math.min(minimapHeightPx - TOOLTIP_HEIGHT, positions[i]));
-    }
-    return positions;
-  }, [minimapHovered, nodes, minimapHeightPx]);
 
   if (!visible) return null;
 
@@ -230,6 +205,25 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
         return Math.abs(node.topRatio - mouseYRatio) < Math.abs(nodes[best].topRatio - mouseYRatio) ? node.index : best;
       }, 0)
     : null;
+
+  const visibleTooltips = minimapHovered && nearestIndex !== null
+    ? (() => {
+        const previewNodes = nodes
+          .map((node) => ({ node, preview: getMessagePreview(node.msg) }))
+          .filter((item) => item.preview);
+        const nearestPreviewIndex = previewNodes.findIndex((item) => item.node.index === nearestIndex);
+        if (nearestPreviewIndex === -1) return [];
+
+        let start = Math.max(0, nearestPreviewIndex - Math.floor(MAX_VISIBLE_TOOLTIPS / 2));
+        start = Math.min(start, Math.max(0, previewNodes.length - MAX_VISIBLE_TOOLTIPS));
+        return previewNodes.slice(start, start + MAX_VISIBLE_TOOLTIPS);
+      })()
+    : [];
+
+  const tooltipListHeight = visibleTooltips.length * TOOLTIP_HEIGHT + Math.max(0, visibleTooltips.length - 1) * TOOLTIP_GAP;
+  const tooltipListTop = mouseYRatio === null || visibleTooltips.length === 0
+    ? 0
+    : Math.max(0, Math.min(minimapHeightPx - tooltipListHeight, Math.round(mouseYRatio * minimapHeightPx - tooltipListHeight / 2)));
 
   return (
     <div
@@ -326,49 +320,66 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
         }}
       />
 
-      {/* Tooltips for all nodes, collision-free positions */}
-      {minimapHovered && nodes.map((node, i) => {
-        const preview = getMessagePreview(node.msg);
-        const color = getNodeColor(node.msg);
-        const isNearest = nearestIndex === node.index;
-        if (!preview || tooltipPositions.length === 0) return null;
-        return (
+      {/* Nearby previews */}
+      {visibleTooltips.length > 0 && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: tooltipListTop,
+            right: "100%",
+            width: TOOLTIP_WIDTH + 6,
+            paddingRight: 6,
+            zIndex: 100,
+            pointerEvents: "auto",
+          }}
+        >
           <div
-            key={node.index}
             style={{
-              position: "absolute",
-              top: tooltipPositions[i],
-              right: "100%",
-              marginRight: 6,
-              background: "var(--bg)",
-              borderTop: `1px solid ${isNearest ? color.border : "var(--border)"}`,
-              borderRight: `1px solid ${isNearest ? color.border : "var(--border)"}`,
-              borderBottom: `1px solid ${isNearest ? color.border : "var(--border)"}`,
-              borderLeft: `2px solid ${color.border}`,
-              borderRadius: 4,
-              padding: "2px 7px",
-              width: 200,
-              zIndex: 100,
-              pointerEvents: "none",
-              opacity: isNearest ? 1 : 0.45,
-              transition: "top 0.1s, opacity 0.1s",
+              display: "flex",
+              flexDirection: "column",
+              gap: TOOLTIP_GAP,
+              filter: "drop-shadow(0 8px 18px rgba(0,0,0,0.16))",
             }}
           >
-            <div
-              style={{
-                fontSize: 11,
-                color: isNearest ? "var(--text)" : "var(--text-muted)",
-                lineHeight: 1.4,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {preview}
-            </div>
+            {visibleTooltips.map(({ node, preview }) => {
+              const color = getNodeColor(node.msg);
+              const isNearest = nearestIndex === node.index;
+              return (
+                <div
+                  key={node.index}
+                  style={{
+                    height: TOOLTIP_HEIGHT,
+                    background: "var(--bg)",
+                    borderTop: `1px solid ${isNearest ? color.border : "var(--border)"}`,
+                    borderRight: `1px solid ${isNearest ? color.border : "var(--border)"}`,
+                    borderBottom: `1px solid ${isNearest ? color.border : "var(--border)"}`,
+                    borderLeft: `2px solid ${color.border}`,
+                    borderRadius: 4,
+                    padding: "2px 7px",
+                    width: TOOLTIP_WIDTH,
+                    opacity: isNearest ? 1 : 0.55,
+                    transition: "opacity 0.1s",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: isNearest ? "var(--text)" : "var(--text-muted)",
+                      lineHeight: 1.4,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {preview}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        </div>
+      )}
     </div>
   );
 }

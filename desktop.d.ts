@@ -32,6 +32,15 @@ declare global {
     packages: PiCorePackageInfo[];
   }
 
+  interface PiAppUpdateStatus {
+    currentVersion: string;
+    latestVersion: string | null;
+    releaseName: string | null;
+    releaseUrl: string;
+    publishedAt: string | null;
+    hasUpdate: boolean;
+  }
+
   interface Window {
     piDesktop?: {
       platform: DesktopPlatform;
@@ -42,6 +51,8 @@ declare global {
       getCoreStatus: () => Promise<PiCoreStatus>;
       checkCoreUpdates: () => Promise<PiCoreStatus>;
       updateCore: () => Promise<PiCoreStatus>;
+      checkAppUpdates: () => Promise<PiAppUpdateStatus>;
+      openAppDownloadPage: (url?: string) => Promise<null>;
       openRuntimeFolder: () => Promise<string>;
       openLogFile: () => Promise<string>;
       selectDirectory: () => Promise<string | null>;

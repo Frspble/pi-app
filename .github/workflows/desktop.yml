@@ -47,7 +47,6 @@ jobs:
           name: pi-app-macos
           path: |
             dist-desktop/*.dmg
-            dist-desktop/*.zip
           if-no-files-found: error
 
   windows:
