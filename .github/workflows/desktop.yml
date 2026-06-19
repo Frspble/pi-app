@@ -80,7 +80,6 @@ jobs:
           name: pi-app-windows
           path: |
             dist-desktop/*.exe
-            dist-desktop/*.zip
           if-no-files-found: error
 
   release:
@@ -106,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -d '' assets < <(find release-assets -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.zip' \) -print0 | sort -z)
+          mapfile -d '' assets < <(find release-assets -type f \( -name '*.dmg' -o -name '*.exe' \) -print0 | sort -z)
           if [ "${#assets[@]}" -eq 0 ]; then
             echo "No release assets found" >&2
             exit 1

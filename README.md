@@ -21,7 +21,7 @@ Pi Core 不会被打进安装包。桌面端会在用户数据目录中维护独
 下载 GitHub Release 中对应平台的安装包：
 
 - macOS：`.dmg`
-- Windows：NSIS `.exe` 安装包或 `.zip`
+- Windows：NSIS `.exe` 安装包
 
 首次启动时，Pi App 会使用内置 `npm`，并在应用数据目录安装兼容的 Pi Core。默认使用 npmmirror，连接失败时自动回退到 npm 官方源：
 

@@ -23,6 +23,7 @@
 /build/*
 !/build/icon.svg
 !/build/icon.png
+!/build/installer.nsh
 /dist-desktop
 /.build-home
 
