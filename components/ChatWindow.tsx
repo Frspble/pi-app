@@ -65,6 +65,8 @@ const TYPEWRITER_PHRASE_KEYS = [
   "chat.hero.duck",
 ] as const;
 
+const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
+
 function Typewriter({ phrases }: { phrases: string[] }) {
   const [phraseIdx, setPhraseIdx] = useState(0);
   const [text, setText] = useState("");
@@ -105,6 +107,7 @@ function Typewriter({ phrases }: { phrases: string[] }) {
 
 export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange, onModelInfoChange }: Props) {
   const { t } = useI18n();
+  const [piVersion, setPiVersion] = useState(process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0");
   const {
     loading, error, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
@@ -121,6 +124,24 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange,
   });
+
+  useEffect(() => {
+    const desktop = window.piDesktop;
+    if (!desktop) return;
+
+    let active = true;
+    const updateVersion = (packages: PiCorePackageInfo[]) => {
+      const installed = packages.find((pkg) => pkg.name === PI_CODING_AGENT_PACKAGE)?.installed;
+      if (active && installed) setPiVersion(installed);
+    };
+
+    void desktop.getCoreStatus().then((status) => updateVersion(status.packages)).catch(() => {});
+    const unsubscribe = desktop.onCoreSetupState((state) => updateVersion(state.packages));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
   const messageBasePath = session?.cwd ?? newSessionCwd ?? undefined;
 
   const { soundEnabled, onSoundToggle, playDoneSound } = useAudio();
@@ -311,10 +332,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  web <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
+                  app <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
                 </span>
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  pi <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
+                  pi <span style={{ color: "var(--text)" }}>v{piVersion}</span>
                 </span>
               </div>
             </div>

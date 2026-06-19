@@ -501,15 +501,14 @@ export function SettingsConfig({ onClose }: { onClose: () => void }) {
                       </div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(210px, 1.4fr) 100px 110px 130px 120px", gap: 0, fontSize: 11, color: "var(--text-dim)", borderBottom: "1px solid var(--border)" }}>
-                      {[t("core.table.package"), t("core.table.range"), t("core.table.installed"), t("core.table.latest"), t("core.table.status")].map((label) => (
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(190px, 1.5fr) 100px 110px 110px", gap: 0, fontSize: 11, color: "var(--text-dim)", borderBottom: "1px solid var(--border)" }}>
+                      {[t("core.table.package"), t("core.table.installed"), t("core.table.latest"), t("core.table.status")].map((label) => (
                         <div key={label} style={{ padding: "8px 12px", fontWeight: 600 }}>{label}</div>
                       ))}
                     </div>
                     {(coreStatus?.packages ?? []).map((pkg) => (
-                      <div key={pkg.name} style={{ display: "grid", gridTemplateColumns: "minmax(210px, 1.4fr) 100px 110px 130px 120px", gap: 0, alignItems: "center", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+                      <div key={pkg.name} style={{ display: "grid", gridTemplateColumns: "minmax(190px, 1.5fr) 100px 110px 110px", gap: 0, alignItems: "center", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
                         <div style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={pkg.name}>{pkg.name}</div>
-                        <div style={{ padding: "10px 12px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{pkg.range}</div>
                         <div style={{ padding: "10px 12px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{pkg.installed ?? "-"}</div>
                         <div style={{ padding: "10px 12px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{pkg.latest ?? "-"}</div>
                         <div style={{ padding: "10px 12px", color: statusColor(pkg.status), fontWeight: 600 }}>{statusLabel(pkg.status, t)}</div>
