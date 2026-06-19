@@ -2,7 +2,7 @@
 
 Pi App 是基于 [pi-web](https://github.com/agegr/pi-web) fork 的 Pi Coding Agent 桌面客户端。它保留 Web UI 的会话浏览和实时对话体验，并通过 Electron 打包为 macOS / Windows 应用。
 
-Pi Core 不会被打进安装包。桌面端会在用户数据目录中维护独立 runtime，并通过本机 `npm` 安装和更新兼容版本的 Pi Core。
+Pi Core 不会被打进安装包。桌面端会在用户数据目录中维护独立 runtime，并通过 App 内置的 `npm` 安装和更新兼容版本的 Pi Core，无需用户另外安装 Node.js。
 
 ## 主要功能
 
@@ -20,10 +20,10 @@ Pi Core 不会被打进安装包。桌面端会在用户数据目录中维护独
 
 下载 GitHub Release 中对应平台的安装包：
 
-- macOS：`.dmg` 或 `.zip`
+- macOS：`.dmg`
 - Windows：NSIS `.exe` 安装包或 `.zip`
 
-首次启动时，Pi App 会检查本机 `npm`，并在应用数据目录安装兼容的 Pi Core：
+首次启动时，Pi App 会使用内置 `npm`，并在应用数据目录安装兼容的 Pi Core。默认使用 npmmirror，连接失败时自动回退到 npm 官方源：
 
 - macOS：`~/Library/Application Support/PiApp/runtime`
 - Windows：`%APPDATA%/PiApp/runtime`

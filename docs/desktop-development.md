@@ -2,9 +2,10 @@
 
 This project uses Electron as a thin desktop shell around the existing Next.js app.
 Pi Core is not bundled into the desktop app. Electron installs and updates Pi Core
-inside the app user-data runtime with local npm, then runs it in a separate local
-Node service. The Next.js process stays focused on the UI and proxies Core APIs
-to that service.
+inside the app user-data runtime with the packaged npm CLI and Electron's Node
+runtime, then runs it in a separate local Node service. Packaged apps do not
+require a system Node.js installation. The Next.js process stays focused on the
+UI and proxies Core APIs to that service.
 
 ## One-command Electron dev
 
@@ -97,9 +98,12 @@ service, swaps the staged runtime into place, starts the service again, and roll
 back if the health check fails. The UI/Next service does not need to restart for
 Pi Core updates.
 
-If Node/npm is installed through nvm, asdf, fnm, Volta, Homebrew, or a common
-Windows Node installer location, Electron will try those paths even when launched
-from Finder or Explorer.
+Packaged apps prefer the npm CLI copied into `resources/bundled-npm`. Development
+builds use the project-local npm package and can fall back to a system npm when
+explicitly overridden with `PI_WEB_NPM`. Pi Core network operations use
+`https://registry.npmmirror.com` by default and retry against
+`https://registry.npmjs.org` if the mirror fails. Set `PI_APP_NPM_REGISTRY` and
+`PI_APP_NPM_FALLBACK_REGISTRY` to override those endpoints while debugging.
 
 ## Smoke test before packaging
 

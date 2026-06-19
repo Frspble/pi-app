@@ -22,6 +22,8 @@ const CORE_PACKAGES = [
 ];
 const CORE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const NPM_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_NPM_REGISTRY = "https://registry.npmmirror.com";
+const FALLBACK_NPM_REGISTRY = "https://registry.npmjs.org";
 const SERVER_READY_TIMEOUT_MS = 90 * 1000;
 const CORE_SERVICE_READY_TIMEOUT_MS = 60 * 1000;
 const CORE_SERVICE_HEALTH_TIMEOUT_MS = 10 * 1000;
@@ -85,7 +87,7 @@ const DESKTOP_TRANSLATIONS = {
     "startup.syncingCore": "Preparing Pi Core runtime files...",
     "startup.startingCoreService": "Starting Pi Core service...",
     "startup.coreServiceReady": "Pi Core service ready",
-    "startup.checkingTooling": "Checking local Node.js and npm...",
+    "startup.checkingTooling": "Checking the bundled package manager...",
     "startup.coreReady": "Pi Core runtime ready",
     "startup.installingCore": "Installing Pi Core packages: {packages}",
     "startup.coreInstallFailed": "Pi Core could not be installed.",
@@ -98,8 +100,7 @@ const DESKTOP_TRANSLATIONS = {
     "common.update": "Update",
     "common.cancel": "Cancel",
     "common.missing": "missing",
-    "dialog.nodeRequired": "Node.js is required to run Pi App. Install Node.js, then retry.",
-    "dialog.npmRequired": "npm is required to install Pi Core. Install npm, then retry.",
+    "dialog.npmRequired": "The bundled npm runtime is unavailable. Reinstall Pi App, then retry.",
     "dialog.updateCheckFailedTitle": "Pi Core update check failed",
     "dialog.updateCheckFailedMessage": "Could not check npm for Pi Core updates.",
     "dialog.upToDateTitle": "Pi Core is up to date",
@@ -139,7 +140,7 @@ const DESKTOP_TRANSLATIONS = {
     "startup.syncingCore": "正在准备 Pi Core 运行文件...",
     "startup.startingCoreService": "正在启动 Pi Core 服务...",
     "startup.coreServiceReady": "Pi Core 服务已就绪",
-    "startup.checkingTooling": "正在检查本地 Node.js 和 npm...",
+    "startup.checkingTooling": "正在检查内置包管理器...",
     "startup.coreReady": "Pi Core 运行时已就绪",
     "startup.installingCore": "正在安装 Pi Core 包：{packages}",
     "startup.coreInstallFailed": "Pi Core 无法安装。",
@@ -152,8 +153,7 @@ const DESKTOP_TRANSLATIONS = {
     "common.update": "更新",
     "common.cancel": "取消",
     "common.missing": "未安装",
-    "dialog.nodeRequired": "Pi App 需要 Node.js 才能运行。请安装 Node.js 后重试。",
-    "dialog.npmRequired": "安装 Pi Core 需要 npm。请安装 npm 后重试。",
+    "dialog.npmRequired": "内置 npm 运行环境不可用。请重新安装 Pi App 后重试。",
     "dialog.updateCheckFailedTitle": "Pi Core 更新检查失败",
     "dialog.updateCheckFailedMessage": "无法从 npm 检查 Pi Core 更新。",
     "dialog.upToDateTitle": "Pi Core 已是最新",
@@ -473,14 +473,19 @@ function getNpmCommand() {
   return findCommand(process.platform === "win32" ? "npm.cmd" : "npm") || (process.platform === "win32" ? "npm.cmd" : "npm");
 }
 
-function getNodeCommand() {
-  if (process.env.PI_WEB_NODE) return process.env.PI_WEB_NODE;
-  return findCommand("node") || "node";
-}
-
 function getAppNodeCommand() {
   if (process.env.PI_APP_NODE) return process.env.PI_APP_NODE;
   return getPackagedMacHelperCommand() || process.execPath;
+}
+
+function getBundledNpmCli() {
+  if (process.env.PI_WEB_NPM && !process.env.PI_APP_NPM_CLI) return null;
+  const candidates = [
+    process.env.PI_APP_NPM_CLI,
+    app.isPackaged && path.join(process.resourcesPath, "bundled-npm", "bin", "npm-cli.js"),
+    path.join(getAppRoot(), "node_modules", "npm", "bin", "npm-cli.js"),
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
 function getPackagedMacHelperCommand() {
@@ -506,6 +511,40 @@ function withAppNodeEnv(env = process.env) {
     ...env,
     ELECTRON_RUN_AS_NODE: "1",
   });
+}
+
+function ensureAppNodeShim() {
+  const shimDir = path.join(app.getPath("userData"), "toolchain", "bin");
+  fs.mkdirSync(shimDir, { recursive: true });
+  const appNode = getAppNodeCommand();
+
+  if (process.platform === "win32") {
+    const shimPath = path.join(shimDir, "node.cmd");
+    const escapedAppNode = appNode.replace(/%/g, "%%");
+    fs.writeFileSync(shimPath, `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${escapedAppNode}" %*\r\n`);
+    return shimDir;
+  }
+
+  const shimPath = path.join(shimDir, "node");
+  try {
+    fs.rmSync(shimPath, { force: true });
+    fs.symlinkSync(appNode, shimPath);
+  } catch {
+    const quotedAppNode = `'${appNode.replace(/'/g, `'"'"'`)}'`;
+    fs.writeFileSync(shimPath, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${quotedAppNode} "$@"\n`, { mode: 0o755 });
+  }
+  return shimDir;
+}
+
+function withBundledNpmEnv(npmCli, env = process.env) {
+  const shimDir = ensureAppNodeShim();
+  const nextEnv = withAppNodeEnv({
+    ...env,
+    npm_execpath: npmCli,
+    npm_node_execpath: getAppNodeCommand(),
+  });
+  nextEnv.PATH = [shimDir, nextEnv.PATH].filter(Boolean).join(path.delimiter);
+  return nextEnv;
 }
 
 function getArgValue(name) {
@@ -570,12 +609,22 @@ function runCommand(command, args, options = {}) {
 }
 
 function getNpmInvocation() {
+  const bundledNpmCli = getBundledNpmCli();
+  if (bundledNpmCli) {
+    return {
+      command: getAppNodeCommand(),
+      args: [bundledNpmCli],
+      shell: false,
+      bundledNpmCli,
+    };
+  }
+
   const npmCommand = getNpmCommand();
   if (process.platform === "win32" && /\.cmd$/i.test(npmCommand)) {
     const npmCli = path.join(path.dirname(npmCommand), "node_modules", "npm", "bin", "npm-cli.js");
     if (fs.existsSync(npmCli)) {
       return {
-        command: getNodeCommand(),
+        command: process.env.PI_WEB_NODE || findCommand("node") || "node",
         args: [npmCli],
         shell: false,
       };
@@ -591,10 +640,48 @@ function getNpmInvocation() {
 
 function runNpmCommand(args, options = {}) {
   const npm = getNpmInvocation();
+  const env = npm.bundledNpmCli
+    ? withBundledNpmEnv(npm.bundledNpmCli, options.env)
+    : options.env;
   return runCommand(npm.command, [...npm.args, ...args], {
     ...options,
+    env,
     shell: npm.shell,
   });
+}
+
+function getNpmRegistries() {
+  return [...new Set([
+    process.env.PI_APP_NPM_REGISTRY || DEFAULT_NPM_REGISTRY,
+    process.env.PI_APP_NPM_FALLBACK_REGISTRY || FALLBACK_NPM_REGISTRY,
+  ].filter(Boolean))];
+}
+
+async function runNpmNetworkCommand(args, options = {}) {
+  const registries = getNpmRegistries();
+  let lastError = null;
+  for (let index = 0; index < registries.length; index++) {
+    const registry = registries[index];
+    try {
+      return await runNpmCommand([
+        ...args,
+        `--registry=${registry}`,
+        "--fetch-retries=2",
+        "--fetch-retry-mintimeout=1000",
+        "--fetch-retry-maxtimeout=10000",
+        "--fetch-timeout=60000",
+      ], options);
+    } catch (error) {
+      lastError = error;
+      if (index < registries.length - 1) {
+        const nextRegistry = registries[index + 1];
+        const message = `npm registry ${registry} failed; retrying with ${nextRegistry}\n`;
+        log(message.trim());
+        options.onStderr?.(message);
+      }
+    }
+  }
+  throw lastError;
 }
 
 function readJson(filePath) {
@@ -1091,24 +1178,9 @@ function waitForHttp(url, timeoutMs = 30_000) {
   });
 }
 
-async function ensureNodeAvailable() {
-  const env = withDesktopPath();
-  try {
-    await runCommand(getNodeCommand(), ["--version"], {
-      env,
-      timeout: 15_000,
-      shell: false,
-    });
-  } catch (error) {
-    throw new Error(`${desktopT("dialog.nodeRequired")}\n\n${error.message}`);
-  }
-}
-
 async function ensureNpmAvailable() {
-  const env = withDesktopPath();
   try {
     await runNpmCommand(["--version"], {
-      env,
       timeout: 15_000,
     });
   } catch (error) {
@@ -1117,7 +1189,6 @@ async function ensureNpmAvailable() {
 }
 
 async function ensureToolingAvailable() {
-  await ensureNodeAvailable();
   await ensureNpmAvailable();
 }
 
@@ -1156,7 +1227,7 @@ async function installCoreRuntimeToStaging(reason) {
     detail: `npm ${args.join(" ")}`,
     runtimeDir,
   });
-  await runNpmCommand(args, {
+  await runNpmNetworkCommand(args, {
     cwd: stagingDir,
     env: withDesktopPath({ ...process.env, FORCE_COLOR: "0" }),
     timeout: NPM_TIMEOUT_MS,
@@ -1355,7 +1426,7 @@ async function checkRemoteCoreVersions() {
   const specs = getCoreSpecs();
   const remote = {};
   for (const spec of specs) {
-    const { stdout } = await runNpmCommand(["view", `${spec.name}@${spec.range}`, "version", "--json"], {
+    const { stdout } = await runNpmNetworkCommand(["view", `${spec.name}@${spec.range}`, "version", "--json"], {
       env: withDesktopPath({ ...process.env, FORCE_COLOR: "0" }),
       timeout: 45_000,
     });
@@ -2363,7 +2434,8 @@ async function boot() {
       detail: "",
       runtimeDir: runtimeInfo.runtimeDir,
     });
-    log(`${PRODUCT_NAME} booting`, `userData=${app.getPath("userData")}\nappNode=${getAppNodeCommand()}\nsystemNode=${getNodeCommand()}\nnpm=${getNpmCommand()}\nPATH=${withDesktopPath().PATH}`);
+    const npmInvocation = getNpmInvocation();
+    log(`${PRODUCT_NAME} booting`, `userData=${app.getPath("userData")}\nappNode=${getAppNodeCommand()}\nnpm=${npmInvocation.command} ${npmInvocation.args.join(" ")}\nPATH=${withDesktopPath().PATH}`);
     createMenu();
     createMainWindow();
     loadMainAppWhenReady().catch((error) => {

@@ -75,6 +75,14 @@ function getPackagedAppDir(context) {
   return path.join(context.appOutDir, "resources", "app");
 }
 
+function getPackagedResourcesDir(context) {
+  if (context.electronPlatformName === "darwin") {
+    const productName = context.packager.appInfo.productFilename;
+    return path.join(context.appOutDir, `${productName}.app`, "Contents", "Resources");
+  }
+  return path.join(context.appOutDir, "resources");
+}
+
 function removePackage(nodeModulesDir, packageName) {
   const packageDir = path.join(nodeModulesDir, ...packageName.split("/"));
   fs.rmSync(packageDir, { recursive: true, force: true });
@@ -84,7 +92,7 @@ function copyDirectory(source, target) {
   if (!fs.existsSync(source)) return;
   fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.cpSync(source, target, { recursive: true });
+  fs.cpSync(source, target, { recursive: true, verbatimSymlinks: true });
 }
 
 function removeCorePackages(nodeModulesDir, packageNames) {
@@ -121,6 +129,11 @@ module.exports = async function afterPack(context) {
   const nonCoreClosure = collectClosure(packages, nonCoreRoots);
 
   const appDir = getPackagedAppDir(context);
+  const bundledNpmSource = path.join(projectDir, "node_modules", "npm");
+  if (!fs.existsSync(path.join(bundledNpmSource, "bin", "npm-cli.js"))) {
+    throw new Error("Bundled npm is missing. Run npm install before packaging Pi App.");
+  }
+  copyDirectory(bundledNpmSource, path.join(getPackagedResourcesDir(context), "bundled-npm"));
   trimPackagedPackageMetadata(appDir, rootPackage);
   copyDirectory(
     path.join(appDir, ".next", "static"),
