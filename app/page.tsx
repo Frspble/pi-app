@@ -1,10 +1,13 @@
 import { Suspense } from "react";
 import { AppShell } from "@/components/AppShell";
+import { ContextMenuProvider } from "@/components/ContextMenuProvider";
 
 export default function Home() {
   return (
-    <Suspense>
-      <AppShell />
-    </Suspense>
+    <ContextMenuProvider>
+      <Suspense>
+        <AppShell />
+      </Suspense>
+    </ContextMenuProvider>
   );
 }

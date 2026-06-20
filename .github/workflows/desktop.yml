@@ -9,19 +9,26 @@ on:
 permissions:
   contents: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   macos:
-    name: macOS desktop package
-    runs-on: macos-latest
+    name: macOS desktop package (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            artifact: pi-app-macos-arm64-installer
+          - arch: x64
+            runner: macos-15-intel
+            artifact: pi-app-macos-x64-installer
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: npm
@@ -39,25 +46,25 @@ jobs:
         run: npm run build
 
       - name: Build macOS package
-        run: npx electron-builder --mac --publish never
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish never
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: pi-app-macos
+          name: ${{ matrix.artifact }}
           path: |
             dist-desktop/*.dmg
           if-no-files-found: error
 
   windows:
-    name: Windows desktop package
+    name: Windows desktop package (x64)
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: npm
@@ -75,9 +82,9 @@ jobs:
         run: npm run desktop:pack:win
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: pi-app-windows
+          name: pi-app-windows-installer
           path: |
             dist-desktop/*.exe
           if-no-files-found: error
@@ -91,10 +98,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download desktop artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: release-assets
 

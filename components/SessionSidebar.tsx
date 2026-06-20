@@ -897,7 +897,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </button>
           </div>
           {explorerOpen && (
-            <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+            <div
+              data-context-file-path={selectedCwdProp ?? selectedCwd!}
+              style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}
+            >
               <FileExplorer
                 cwd={selectedCwdProp ?? selectedCwd!}
                 onOpenFile={onOpenFile ?? (() => {})}

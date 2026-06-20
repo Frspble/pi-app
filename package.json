@@ -110,6 +110,7 @@
     },
     "mac": {
       "icon": "build/icon.png",
+      "artifactName": "Pi-App-${version}-macOS-${arch}.${ext}",
       "target": [
         "dmg"
       ],
@@ -118,6 +119,7 @@
     },
     "win": {
       "icon": "build/icon.ico",
+      "artifactName": "Pi-App-${version}-Windows-${arch}-Setup.${ext}",
       "target": [
         {
           "target": "nsis",

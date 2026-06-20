@@ -110,6 +110,7 @@ function TreeNode({
   return (
     <div>
       <div
+        data-context-file-path={node.fullPath}
         onClick={handleClick}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -258,7 +259,7 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
   }
 
   return (
-    <div style={{ padding: "2px 4px" }}>
+    <div data-context-file-path={cwd} style={{ minHeight: "100%", padding: "2px 4px" }}>
       {roots.map((node) => (
         <TreeNode
           key={node.fullPath}

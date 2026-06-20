@@ -985,6 +985,7 @@ export function AppShell() {
 
       {/* Right panel: file viewer — always mounted, width animated via CSS */}
       <div
+        data-context-file-path={activeFileTab?.filePath ?? activeCwd ?? undefined}
         className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
         style={{
           display: "flex",

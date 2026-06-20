@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 "use strict";
 
-const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme } = require("electron");
+const { app, BrowserWindow, Menu, clipboard, dialog, shell, ipcMain, nativeTheme } = require("electron");
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -2158,6 +2158,29 @@ function registerDesktopIpc() {
       : await dialog.showOpenDialog(options);
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
+  });
+  ipcMain.handle("piDesktop:readClipboardText", async () => clipboard.readText());
+  ipcMain.handle("piDesktop:writeClipboardText", async (_event, text) => {
+    if (typeof text !== "string") return null;
+    clipboard.writeText(text);
+    return null;
+  });
+  ipcMain.handle("piDesktop:revealPath", async (_event, targetPath) => {
+    if (typeof targetPath !== "string" || !path.isAbsolute(targetPath)) {
+      return { ok: false, error: "Invalid local path." };
+    }
+
+    try {
+      const stats = await fs.promises.stat(targetPath);
+      if (stats.isDirectory()) {
+        const error = await shell.openPath(targetPath);
+        return error ? { ok: false, error } : { ok: true };
+      }
+      shell.showItemInFolder(targetPath);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error.message || String(error) };
+    }
   });
   ipcMain.handle("piDesktop:setTheme", async (_event, mode, resolvedTheme) => {
     applyWindowTheme(mode, resolvedTheme);
