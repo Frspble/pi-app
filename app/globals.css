@@ -127,16 +127,36 @@ pre, code {
   font-family: var(--font-mono);
 }
 
-.desktop-chrome .app-titlebar {
+.desktop-chrome .window-drag-handle {
   -webkit-app-region: drag;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.desktop-chrome button,
-.desktop-chrome input,
-.desktop-chrome textarea,
-.desktop-chrome select,
-.desktop-chrome a,
-.desktop-chrome [role="button"],
+.desktop-chrome .app-titlebar,
+.desktop-chrome .right-panel-titlebar {
+  position: relative;
+  z-index: 250;
+  isolation: isolate;
+}
+
+.desktop-chrome .chat-scroll-container {
+  contain: paint;
+  isolation: isolate;
+}
+
+.desktop-chrome .app-titlebar button,
+.desktop-chrome .app-titlebar input,
+.desktop-chrome .app-titlebar textarea,
+.desktop-chrome .app-titlebar select,
+.desktop-chrome .app-titlebar a,
+.desktop-chrome .app-titlebar [role="button"],
+.desktop-platform-darwin .session-sidebar-header button,
+.desktop-platform-darwin .session-sidebar-header input,
+.desktop-platform-darwin .session-sidebar-header textarea,
+.desktop-platform-darwin .session-sidebar-header select,
+.desktop-platform-darwin .session-sidebar-header a,
+.desktop-platform-darwin .session-sidebar-header [role="button"],
 .desktop-chrome .no-window-drag {
   -webkit-app-region: no-drag;
 }
@@ -152,6 +172,7 @@ pre, code {
   height: 36px;
   flex: 0 0 78px;
   pointer-events: none;
+  -webkit-app-region: drag;
 }
 
 /* react-markdown output styles */
@@ -342,23 +363,61 @@ span.linenumber {
 /* Right panel: animate width */
 @media (min-width: 641px) {
   .right-panel-container {
+    position: relative;
     overflow: hidden;
     transition: width 0.2s ease, min-width 0.2s ease;
     flex-shrink: 0;
   }
+  .right-panel-container.right-panel-resizing {
+    transition: none;
+  }
   .right-panel-container.right-panel-open {
     width: 42%;
     min-width: 300px;
+  }
+  .right-panel-container.right-panel-open::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 280;
+    width: 1px;
+    background: var(--border);
+    pointer-events: none;
   }
   .right-panel-container.right-panel-closed {
     width: 0;
     min-width: 0;
     border-left: none !important;
   }
-  /* keep inner content at fixed width so it doesn't reflow during animation */
   .right-panel-container > * {
-    width: 42vw;
-    min-width: 300px;
+    min-width: 0;
+  }
+  .right-panel-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 290;
+    width: 8px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .right-panel-resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 1px;
+    background: transparent;
+    transition: background 0.12s;
+  }
+  .right-panel-resize-handle:hover::after,
+  .right-panel-resize-handle:focus-visible::after,
+  .right-panel-container.right-panel-resizing .right-panel-resize-handle::after {
+    background: var(--accent);
   }
 }
 
@@ -390,9 +449,12 @@ span.linenumber {
     transition: width 0.2s ease, min-width 0.2s ease;
     flex-shrink: 0;
   }
+  .right-panel-resize-handle {
+    display: none;
+  }
   .right-panel-container.right-panel-open {
-    width: 100%;
-    min-width: 0;
+    width: 100% !important;
+    min-width: 0 !important;
   }
   .right-panel-container.right-panel-closed {
     width: 0 !important;

@@ -178,12 +178,16 @@ export function AppShell() {
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [settingsConfigOpen, setSettingsConfigOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [rightPanelWidth, setRightPanelWidth] = useState<number | null>(null);
+  const [rightPanelResizing, setRightPanelResizing] = useState(false);
   const [coreSetupState, setCoreSetupState] = useState<PiCoreSetupState | null>(null);
   const [desktopRuntimeChecked, setDesktopRuntimeChecked] = useState(false);
   const [hasDesktopSetupApi, setHasDesktopSetupApi] = useState(false);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform | null>(null);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
+  const rightPanelRef = useRef<HTMLDivElement>(null);
+  const rightPanelResizeStartRef = useRef({ x: 0, width: 0 });
   const coreReady = desktopRuntimeChecked && (!hasDesktopSetupApi || coreSetupState?.phase === "ready");
 
   // Branch navigator state — populated by ChatWindow via onBranchDataChange
@@ -262,6 +266,42 @@ export function AppShell() {
   useEffect(() => {
     void window.piDesktop?.setTheme?.(themeMode, resolvedTheme);
   }, [themeMode, resolvedTheme]);
+
+  const clampRightPanelWidth = useCallback((width: number) => {
+    const sidebarWidth = sidebarOpen ? 260 : 0;
+    const maxWidth = Math.max(300, window.innerWidth - sidebarWidth - 360);
+    return Math.min(maxWidth, Math.max(300, width));
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    const handleWindowResize = () => {
+      setRightPanelWidth((width) => width === null ? null : clampRightPanelWidth(width));
+    };
+    handleWindowResize();
+    window.addEventListener("resize", handleWindowResize);
+    return () => window.removeEventListener("resize", handleWindowResize);
+  }, [clampRightPanelWidth]);
+
+  useEffect(() => {
+    if (!rightPanelResizing) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const { x, width } = rightPanelResizeStartRef.current;
+      setRightPanelWidth(clampRightPanelWidth(width + x - event.clientX));
+    };
+    const handlePointerUp = () => setRightPanelResizing(false);
+
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointercancel", handlePointerUp, { once: true });
+    return () => {
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, [rightPanelResizing, clampRightPanelWidth]);
 
   useEffect(() => {
     const desktop = window.piDesktop;
@@ -806,6 +846,11 @@ export function AppShell() {
               </button>
             </div>
           )}
+          <div
+            className="window-drag-handle"
+            aria-hidden="true"
+            style={{ flex: "1 1 auto", minWidth: desktopPlatform ? 40 : 0, height: "100%" }}
+          />
           {/* Session stats — right-aligned in top bar */}
           {coreReady && showChat && (() => {
             const tokens = sessionStats?.tokens;
@@ -847,11 +892,13 @@ export function AppShell() {
               <div
                 className="no-window-drag"
                 style={{
-                  marginLeft: "auto",
                   display: "flex", alignItems: "center", gap: 10,
                   paddingLeft: 12,
                   paddingRight: rightPanelOpen ? 12 : 48,
                   height: "100%",
+                  minWidth: 0,
+                  overflow: "hidden",
+                  flexShrink: 1,
                   fontSize: 11, color: "var(--text-muted)",
                   whiteSpace: "nowrap", cursor: "default",
                   fontVariantNumeric: "tabular-nums",
@@ -985,17 +1032,42 @@ export function AppShell() {
 
       {/* Right panel: file viewer — always mounted, width animated via CSS */}
       <div
+        ref={rightPanelRef}
         data-context-file-path={activeFileTab?.filePath ?? activeCwd ?? undefined}
-        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
+        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizing ? " right-panel-resizing" : ""}`}
         style={{
           display: "flex",
           flexDirection: "column",
-          borderLeft: "1px solid var(--border)",
           background: "var(--bg)",
+          ...(rightPanelOpen && rightPanelWidth !== null ? { width: rightPanelWidth, minWidth: rightPanelWidth } : {}),
         }}
       >
+        {rightPanelOpen && (
+          <div
+            className="right-panel-resize-handle no-window-drag"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("app.resizeFilePanel")}
+            tabIndex={0}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              const panelWidth = rightPanelRef.current?.getBoundingClientRect().width;
+              if (!panelWidth) return;
+              event.preventDefault();
+              rightPanelResizeStartRef.current = { x: event.clientX, width: panelWidth };
+              setRightPanelResizing(true);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const currentWidth = rightPanelWidth ?? rightPanelRef.current?.getBoundingClientRect().width ?? 300;
+              const delta = event.key === "ArrowLeft" ? 16 : -16;
+              setRightPanelWidth(clampRightPanelWidth(currentWidth + delta));
+            }}
+          />
+        )}
         {/* Right panel tab bar */}
-        <div className="right-panel-titlebar no-window-drag" style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
+        <div className="right-panel-titlebar window-drag-handle" style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
           <div style={{ flex: 1, overflow: "hidden" }}>
             <TabBar
               tabs={fileTabs}

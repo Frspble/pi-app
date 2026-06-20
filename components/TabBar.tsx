@@ -37,6 +37,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
         return (
           <div
             key={tab.id}
+            className="no-window-drag"
             onClick={() => onSelectTab(tab.id)}
             style={{
               display: "flex",
